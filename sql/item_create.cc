@@ -1,5 +1,6 @@
 /*
    Copyright (c) 2000, 2025, Oracle and/or its affiliates.
+   Copyright (c) 2025, IP-Solutions AB
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -1658,6 +1659,8 @@ static const std::pair<const char *, Create_func *> func_array[] = {
     {"FROM_VECTOR", SQL_FN(Item_func_from_vector, 1)},
     {"VECTOR_TO_STRING", SQL_FN(Item_func_from_vector, 1)},
     {"VECTOR_DIM", SQL_FN(Item_func_vector_dim, 1)},
+    {"VECTOR_DISTANCE", SQL_FN_V(Item_func_vector_distance, 2, 3)},
+    {"DISTANCE", SQL_FN_V(Item_func_vector_distance, 2, 3)},
     {"UCASE", SQL_FN(Item_func_upper, 1)},
     {"UNCOMPRESS", SQL_FN(Item_func_uncompress, 1)},
     {"UNCOMPRESSED_LENGTH", SQL_FN(Item_func_uncompressed_length, 1)},

@@ -2,6 +2,7 @@
 #define ITEM_FUNC_INCLUDED
 
 /* Copyright (c) 2000, 2025, Oracle and/or its affiliates.
+   Copyright (c) 2025, IP-Solutions AB
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -841,6 +842,10 @@ class Item_real_func : public Item_func {
   Item_real_func(Item *a, Item *b) : Item_func(a, b) { set_data_type_double(); }
 
   Item_real_func(const POS &pos, Item *a, Item *b) : Item_func(pos, a, b) {
+    set_data_type_double();
+  }
+
+  Item_real_func(const POS &pos, Item *a, Item *b, Item *c) : Item_func(pos, a, b, c) {
     set_data_type_double();
   }
 
@@ -1810,6 +1815,37 @@ class Item_func_vector_dim : public Item_int_func {
       return true;
     }
     max_length = 10;
+    return false;
+  }
+};
+
+class Item_func_vector_distance : public Item_real_func {
+  String value1, value2, value3;
+  const char *default_algorithm = "DOT";
+
+public:
+  Item_func_vector_distance(const POS &pos, Item *a, Item *b, Item *c)
+    : Item_real_func(pos, a, b, c) {}
+  Item_func_vector_distance(const POS &pos, Item *a, Item *b)
+    : Item_real_func(pos, a, b) {}
+  double val_real() override;
+  const char *func_name() const override { return "distance"; }
+  bool resolve_type(THD *thd) override {
+    if (param_type_is_default(thd, 0, 1, MYSQL_TYPE_VECTOR)) return true;
+    if (param_type_is_default(thd, 1, 2, MYSQL_TYPE_VECTOR)) return true;
+
+    bool valid_type = ((args[0]->data_type() == MYSQL_TYPE_VECTOR) ||
+                       (args[0]->result_type() == STRING_RESULT &&
+                        args[0]->collation.collation == &my_charset_bin)) &&
+                      ((args[1]->data_type() == MYSQL_TYPE_VECTOR) ||
+                       (args[1]->result_type() == STRING_RESULT &&
+                        args[1]->collation.collation == &my_charset_bin)) &&
+                       (arg_count != 3 || args[2]->data_type() == MYSQL_TYPE_VARCHAR);
+
+    if (!valid_type) {
+      my_error(ER_WRONG_ARGUMENTS, MYF(0), func_name());
+      return true;
+    }
     return false;
   }
 };

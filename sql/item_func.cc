@@ -1,4 +1,5 @@
 /* Copyright (c) 2000, 2025, Oracle and/or its affiliates.
+   Copyright (c) 2025, IP-Solutions AB
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -153,6 +154,7 @@
 #include "template_utils.h"  // pointer_cast
 #include "thr_mutex.h"
 #include "vector-common/vector_constants.h"  // get_dimensions
+#include "vector-common/vector_distance.h"
 
 using std::max;
 using std::min;
@@ -4241,6 +4243,73 @@ longlong Item_func_vector_dim::val_int() {
     return error_int(); /* purecov: inspected */
   }
   return (longlong)dimensions;
+}
+
+double Item_func_vector_distance::val_real() {
+  // Check first vector
+  String *val1 = args[0]->val_str(&value1);
+  null_value = false;
+  if (val1 == nullptr || val1->ptr() == nullptr) {
+    return 0.0;
+  }
+  uint32 dim1 = get_dimensions(val1->length(), Field_vector::precision);
+  if (dim1 == UINT32_MAX) {
+    my_error(ER_TO_VECTOR_CONVERSION, MYF(0), val1->length(), val1->ptr());
+    return 0.0;
+  }
+  // Check second vector
+  String *val2 = args[1]->val_str(&value2);
+  null_value = false;
+  if (val2 == nullptr || val2->ptr() == nullptr) {
+    return 0.0;
+  }
+  uint32 dim2 = get_dimensions(val2->length(), Field_vector::precision);
+  if (dim2 == UINT32_MAX) {
+    my_error(ER_TO_VECTOR_CONVERSION, MYF(0), val2->length(), val2->ptr());
+    return 0.0;
+  }
+  if (dim1 != dim2) {
+    char buff[STRING_BUFFER_USUAL_SIZE];
+    sprintf(buff, "DISTANCE, VECTOR(%u) and VECTOR(%u) have different dimensions",
+	    dim1, dim2);
+    my_error(ER_WRONG_ARGUMENTS, MYF(0), buff);
+    return 0.0;
+  }
+  // Check algorithm
+  String da(default_algorithm, sizeof(default_algorithm), system_charset_info);
+  char *algorithm;
+  uint al_len;
+  if (arg_count == 3) {
+      String *val3 = args[2]->val_str(&value3);
+      algorithm = val3->c_ptr();
+      al_len = val3->length();
+  } else {
+    algorithm = da.c_ptr();
+    al_len = da.length();
+  }
+  char *c = algorithm;
+  for (uint i = 0; i++ < al_len; c++) {
+    *c = my_toupper(system_charset_info, *c);
+  }
+  if (strcmp(algorithm, "COSINE") == 0)
+  {
+    return vector_distance_cosine(val1->ptr(), val2->ptr(), dim1);
+  }
+  else if (strcmp(algorithm, "DOT") == 0)
+  {
+    return vector_distance_dot(val1->ptr(), val2->ptr(), dim1);
+  }
+  else if (strcmp(algorithm, "EUCLIDEAN") == 0)
+  {
+    return vector_distance_euclidean(val1->ptr(), val2->ptr(), dim1);
+  }
+  else
+  {
+    char buff[STRING_BUFFER_USUAL_SIZE];
+    sprintf(buff, "DISTANCE, algorithm \"%s\" is not supported", algorithm);
+    my_error(ER_WRONG_ARGUMENTS, MYF(0), buff);
+  }
+  return 0.0;
 }
 
 longlong Item_func_char_length::val_int() {

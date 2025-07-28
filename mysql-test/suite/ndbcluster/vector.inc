@@ -113,6 +113,33 @@ INSERT INTO te VALUES (9, STRING_TO_VECTOR("[0.125,0.591,0.038,0.798,0.167,0.558
 INSERT INTO te VALUES (10, STRING_TO_VECTOR("[0.533,0.443,0.254,0.718]"));
 INSERT INTO te VALUES (11, STRING_TO_VECTOR(@vec2048str));
 
+# Test DISTANCE function
+SELECT pk, DISTANCE(STRING_TO_VECTOR("[1, 2, 3, 4]"), embedding, "COSINE") FROM te WHERE VECTOR_DIM(embedding) = 4 ORDER BY pk;
+SELECT pk, DISTANCE(STRING_TO_VECTOR("[1, 2, 3, 4]"), embedding, "EUCLIDEAN") FROM te WHERE VECTOR_DIM(embedding) = 4 ORDER BY pk;
+SELECT pk, DISTANCE(STRING_TO_VECTOR("[1, 2, 3, 4]"), embedding, "DOT") FROM te WHERE VECTOR_DIM(embedding) = 4 ORDER BY pk;
+# "DOT" is the default
+SELECT pk, DISTANCE(STRING_TO_VECTOR("[1, 2, 3, 4]"), embedding) FROM te WHERE VECTOR_DIM(embedding) = 4 ORDER BY pk;
+# Try function alias
+SELECT pk, VECTOR_DISTANCE(STRING_TO_VECTOR("[1, 2, 3, 4]"), embedding, "COSINE") FROM te WHERE VECTOR_DIM(embedding) = 4 ORDER BY pk;
+SELECT pk, VECTOR_DISTANCE(STRING_TO_VECTOR("[1, 2, 3, 4]"), embedding, "EUCLIDEAN") FROM te WHERE VECTOR_DIM(embedding) = 4 ORDER BY pk;
+SELECT pk, VECTOR_DISTANCE(STRING_TO_VECTOR("[1, 2, 3, 4]"), embedding, "DOT") FROM te WHERE VECTOR_DIM(embedding) = 4 ORDER BY pk;
+# "DOT" is the default
+SELECT pk, VECTOR_DISTANCE(STRING_TO_VECTOR("[1, 2, 3, 4]"), embedding) FROM te WHERE VECTOR_DIM(embedding) = 4 ORDER BY pk;
+# Test index search
+CREATE TABLE te4 LIKE te;
+INSERT INTO te4 SELECT * FROM te WHERE VECTOR_DIM(embedding) = 4;
+select pk, embedding FROM te4 WHERE DISTANCE(STRING_TO_VECTOR("[1, 2, 3, 4]"), embedding, "COSINE") < 0.5 ORDER BY pk;
+DROP TABLE te4;
+# Check zero distance
+select DISTANCE(STRING_TO_VECTOR("[1, 2, 3, 4]"), STRING_TO_VECTOR("[1, 2, 3, 4]"), "COSINE");
+select DISTANCE(STRING_TO_VECTOR("[1, 2, 3, 4]"), STRING_TO_VECTOR("[1, 2, 3, 4]"), "EUCLIDEAN");
+select DISTANCE(STRING_TO_VECTOR("[1, 2, 3, 4]"), STRING_TO_VECTOR("[1, 2, 3, 4]"), "DOT");
+# Check errors
+--error ER_WRONG_ARGUMENTS
+select DISTANCE(STRING_TO_VECTOR("[1, 2, 3, 4]"), embedding, "COSINE") FROM te WHERE pk = 8;
+--error ER_WRONG_ARGUMENTS
+select DISTANCE(STRING_TO_VECTOR("[1, 2, 3, 4]"), embedding, "MANHATTAN") FROM te WHERE pk = 5;
+
 --error ER_ALTER_OPERATION_NOT_SUPPORTED_REASON
 ALTER TABLE te algorithm=inplace, change embedding embedding VECTOR(2000);
 # Bug#37321684 ALTER TABLE sometimes fail sometimes succeed when truncating data 

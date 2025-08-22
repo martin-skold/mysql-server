@@ -26,6 +26,78 @@
 #include <float.h>
 #include <limits.h>
 #include <stdint.h>
+#ifdef __AVX__
+#define USE_SIMD __AVX__
+#include <immintrin.h>
+#endif
+
+/**
+* Cosine distance
+*/
+#ifndef USE_SIMD
+inline double vector_distance_cosine_float(const float* A, const float* B, uint32_t dims)
+{
+  double dot = 0.0, denom_a = 0.0, denom_b = 0.0;
+  double a, b;
+  for(uint32_t i = 0; i < dims; ++i) {
+    a = static_cast<double>(A[i]);
+    b = static_cast<double>(B[i]);
+    dot += a * b;
+    denom_a += a * a;
+    denom_b += b * b;
+  }
+  return 1 - dot / (sqrt(denom_a) * sqrt(denom_b));
+}
+#else
+// SIMD-accelerated Cosine distance calculation, assuming a float vector
+// and assuming the vector is normalized to 16-bit values
+inline double vector_distance_cosine_float(const float* A, const float* B, uint32_t dims)
+{
+  float dot = 0.0, denom_a = 0.0, denom_b = 0.0;
+  __m256 _mm256_dot = _mm256_setzero_ps(); // Initialize dotsum to zero
+  __m256 _mm256_denom_a = _mm256_setzero_ps(); // Initialize first denominator to zero
+  __m256 _mm256_denom_b = _mm256_setzero_ps(); // Initialize second denominator to zero
+  __m256 v1, v2, mu, sq_a, sq_b;
+  uint32_t i = 0;
+  for (; i + 8 <= dims; i += 8) {
+    v1 = _mm256_loadu_ps(A + i);                          // Load 8 floats from A
+    v2 = _mm256_loadu_ps(B + i);                          // Load 8 floats from B
+    mu = _mm256_mul_ps(v1, v2);                           // Multiply the floats from each vector
+    _mm256_dot = _mm256_add_ps(_mm256_dot, mu);           // Sum the dot product
+    sq_a = _mm256_mul_ps(v1, v1);                         // Square floats from first vector
+    _mm256_denom_a = _mm256_add_ps(_mm256_denom_a, sq_a); // Sum the first denominator
+    sq_b = _mm256_mul_ps(v2, v2);                         // Square floats from second vector
+    _mm256_denom_b = _mm256_add_ps(_mm256_denom_b, sq_b); // Sum the second denominator
+  }
+
+  if (i > 0) {
+    // Horizontal sum of the 8 float in the SIMD register
+    float dot_result[8];
+    float denom_a_result[8];
+    float denom_b_result[8];
+    _mm256_storeu_ps(dot_result, _mm256_dot);
+    _mm256_storeu_ps(denom_a_result, _mm256_denom_a);
+    _mm256_storeu_ps(denom_b_result, _mm256_denom_b);
+    for (int j = 0; j < 8; ++j) {
+      dot += dot_result[j];
+      denom_a += denom_a_result[j];
+      denom_b += denom_b_result[j];
+    }
+  }
+
+  // Handle the remaining elements
+  float a, b;
+  for(; i < dims; ++i) {
+    a = A[i];
+    b = B[i];
+    dot += a * b;
+    denom_a += a * a;
+    denom_b += b * b;
+  }
+
+  return static_cast<double>(1 - dot / (sqrt(denom_a) * sqrt(denom_b)));
+}
+#endif
 
 /**
    vector_distancence_cosine calculates the cosine distance as a measure of simularity.
@@ -41,18 +113,63 @@
    @returns cosine distance
  */
 inline double vector_distance_cosine(const char *vector1, const char *vector2, uint32_t dims) {
-  double dot = 0.0, denom_a = 0.0, denom_b = 0.0;
   const float *A = (const float *) vector1, *B = (const float *) vector2;
+
+  return vector_distance_cosine_float(A, B, dims);
+}
+
+/**
+* Dot distance
+*/
+#ifndef USE_SIMD
+inline double vector_distance_dot_float(const float* A, const float* B, uint32_t dims)
+{
+  double distance = 0.0;
+  double a, b;
+  for (uint32_t i = 0; i < dims; ++i) {
+    a = static_cast<double>(A[i]);
+    b = static_cast<double>(B[i]);
+    distance += a * b;
+  }
+
+  return distance;
+}
+#else
+// SIMD-accelerated Dot distance calculation, assuming a float vector
+// and assuming the vector is normalized to 16-bit values
+inline double vector_distance_dot_float(const float* A, const float* B, uint32_t dims)
+{
+  float distance = 0.0;
+  __m256 sum = _mm256_setzero_ps(); // Initialize sum to zero
+  __m256 v1, v2, mu;
+  uint32_t i = 0;
+  for (; i + 8 <= dims; i += 8) {
+    v1 = _mm256_loadu_ps(A + i);  // Load 8 floats from A
+    v2 = _mm256_loadu_ps(B + i);  // Load 8 floats from B
+    mu = _mm256_mul_ps(v1, v2);   // Multiply the floats from each vector
+    sum = _mm256_add_ps(sum, mu); // Accumulate the sum
+  }
+
+  if (i > 0) {
+    // Horizontal sum of the 8 float in the SIMD register
+    float result[8];
+    _mm256_storeu_ps(result, sum);
+    for (int j = 0; j < 8; ++j) {
+      distance += result[j];
+    }
+  }
+
+  // Handle the remaining elements
   float a, b;
-  for(uint32_t i = 0; i < dims; ++i) {
+  for (; i < dims; ++i) {
     a = A[i];
     b = B[i];
-    dot += a * b;
-    denom_a += a * a;
-    denom_b += b * b;
+    distance += a * b;
   }
-  return 1 - dot / (sqrt(denom_a) * sqrt(denom_b));
+
+  return static_cast<double>(distance);
 }
+#endif
 
 /**
    vector_distance_dot uses the dot product as a measure of simularity.
@@ -69,16 +186,61 @@ inline double vector_distance_cosine(const char *vector1, const char *vector2, u
    @returns dot product
  */
 inline double vector_distance_dot(const char *vector1, const char *vector2, uint32_t dims) {
-  double result = 0.0;
   const float *A = (const float *) vector1, *B = (const float *) vector2;
-  float a, b;
-  for (uint32_t i = 0; i < dims; ++i) {
-    a = A[i];
-    b = B[i];
-    result += a * b;
-  }
-  return result;
+
+  return vector_distance_dot_float(A, B, dims);
 }
+
+/**
+* Euclidean distance
+*/
+#ifndef USE_SIMD
+inline double vector_distance_euclidean_float(const float* A, const float* B, uint32_t dims)
+{
+  double distance = 0.0;
+  double diff;
+  for (uint32_t i = 0; i < dims; ++i) {
+    diff = static_cast<double>(A[i] - B[i]);
+    distance += diff * diff;
+  }
+
+  return distance >= 0.0 ? sqrt(distance) : std::numeric_limits<double>::max();
+}
+#else
+// SIMD-accelerated Euclidean distance calculation, assuming a float vector
+// and assuming the vector is normalized to 16-bit values
+inline double vector_distance_euclidean_float(const float* A, const float* B, uint32_t dims) {
+  float distance = 0.0;
+  __m256 sum = _mm256_setzero_ps(); // Initialize sum to zero
+  __m256 v1, v2, _mm256_diff, sq;
+  uint32_t i = 0;
+  for (; i + 8 <= dims; i += 8) {
+    v1 = _mm256_loadu_ps(A + i);                   // Load 8 floats from A
+    v2 = _mm256_loadu_ps(B + i);                   // Load 8 floats from B
+    _mm256_diff = _mm256_sub_ps(v1, v2);           // Compute differences
+    sq = _mm256_mul_ps(_mm256_diff, _mm256_diff);  // Square the differences
+    sum = _mm256_add_ps(sum, sq);                  // Accumulate the sum
+  }
+
+  if (i > 0) {
+    // Horizontal sum of the 8 float in the SIMD register
+    float result[8];
+    _mm256_storeu_ps(result, sum);
+    for (int j = 0; j < 8; ++j) {
+      distance += result[j];
+    }
+  }
+
+  // Handle the remaining elements
+  float diff;
+  for (; i < dims; ++i) {
+    diff = A[i] - B[i];
+    distance += diff * diff;
+  }
+
+  return distance >= 0.0 ? static_cast<double>(sqrt(distance)) : std::numeric_limits<double>::max();
+}
+#endif
 
 /**
    vector_distance_euclidean calculates eucledian distance as a measure of simularity.
@@ -95,14 +257,7 @@ inline double vector_distance_dot(const char *vector1, const char *vector2, uint
    @returns euclidean distance
  */
 inline double vector_distance_euclidean(const char *vector1, const char *vector2, uint32_t dims) {
-  double result = 0.0;
   const float *A = (const float *) vector1, *B = (const float *) vector2;
-  float a, b, dist;
-  for (uint32_t i = 0; i < dims; ++i) {
-    a = A[i];
-    b = B[i];
-    dist = a - b;
-    result += dist * dist;
-  }
-  return result >= 0.0 ? sqrt(result) : std::numeric_limits<double>::max();
+
+  return vector_distance_euclidean_float(A, B, dims);
 }

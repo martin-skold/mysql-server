@@ -23,7 +23,7 @@
 
 ADD_WSHADOW_WARNING()
 
-SET(MY_TIME_SOURCES my_time.cc my_systime.cc)
+SET(MY_TIME_SOURCES my_time.cc my_systime.cc my_temporal.cc)
 
 ADD_CONVENIENCE_LIBRARY(mytime ${MY_TIME_SOURCES})
 
@@ -125,9 +125,7 @@ SET(MYSYS_SOURCES
   my_getopt.cc
   my_kdf.cc
   my_aes.cc
-  my_sha1.cc
   my_sha2.cc
-  my_md5.cc
   my_rnd.cc
   my_openssl_fips.cc
   my_ssl_algo_cache.cc
@@ -226,11 +224,6 @@ ENDIF()
 # Needed to resolve OpenSSL dependency on Windows
 IF(WIN32)
   TARGET_LINK_LIBRARIES(mysys crypt32)
-ENDIF()
-
-# MD5_Init() and others are deprecated.
-IF(SOLARIS AND MY_COMPILER_IS_GNU_OR_CLANG)
-  ADD_COMPILE_FLAGS(my_md5.cc COMPILE_FLAGS "-Wno-deprecated-declarations")
 ENDIF()
 
 # WinSDK files included by these .cc files generate warnings in /analyze

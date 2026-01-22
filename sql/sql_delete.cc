@@ -74,6 +74,7 @@
 #include "sql/sql_const.h"
 #include "sql/sql_error.h"
 #include "sql/sql_executor.h"
+#include "sql/sql_foreign_key_constraint.h"
 #include "sql/sql_lex.h"
 #include "sql/sql_list.h"
 #include "sql/sql_opt_exec_shared.h"
@@ -119,6 +120,12 @@ bool DeleteCurrentRowAndProcessTriggers(THD *thd, TABLE *table,
                                           TRG_ACTION_BEFORE,
                                           /*old_row_is_record1=*/false)) {
       return true;
+    }
+  }
+
+  if (use_sql_fk_checks_for_table(thd, table)) {
+    if (check_all_child_fk_ref(thd, table, enum_fk_dml_type::FK_DELETE)) {
+      return thd->is_error();
     }
   }
 
@@ -300,7 +307,7 @@ bool Sql_cmd_delete::delete_from_single_table(THD *thd) {
     IGNORE keyword within federated storage engine. If federated engine is
     removed in the future, use of HA_EXTRA_IGNORE_DUP_KEY and
     HA_EXTRA_NO_IGNORE_DUP_KEY flag should be removed from
-    delete_from_single_table(), DeleteRowsIterator::Init() and
+    delete_from_single_table(), DeleteRowsIterator::DoInit() and
     handler::ha_reset().
   */
   if (lex->is_ignore()) table->file->ha_extra(HA_EXTRA_IGNORE_DUP_KEY);
@@ -1045,7 +1052,7 @@ bool CheckSqlSafeUpdate(THD *thd, const JOIN *join) {
   return false;
 }
 
-bool DeleteRowsIterator::Init() {
+bool DeleteRowsIterator::DoInit() {
   if (CheckSqlSafeUpdate(thd(), m_join)) {
     return true;
   }
@@ -1233,7 +1240,7 @@ bool DeleteRowsIterator::DoDelayedDeletesFromTable(TABLE *table) {
   return local_error;
 }
 
-int DeleteRowsIterator::Read() {
+int DeleteRowsIterator::DoRead() {
   bool local_error = false;
 
   // First process all the rows returned by the join. Delete immediately from

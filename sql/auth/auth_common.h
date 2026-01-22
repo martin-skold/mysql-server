@@ -702,7 +702,6 @@ class User_table_schema_factory {
   virtual ~User_table_schema_factory() = default;
 };
 
-extern bool mysql_user_table_is_in_short_password_format;
 extern bool disconnect_on_expired_password;
 extern const char *any_db;  // Special symbol for check_access
 /** controls the extra checks on plugin availability for mysql.user records */
@@ -737,7 +736,8 @@ bool acl_check_host(THD *thd, const char *host, const char *ip);
 #define USER_ATTRIBUTES (1L << 8) /* Request to update user attributes */
 
 /* sql_user */
-void log_user(THD *thd, String *str, LEX_USER *user, bool comma);
+void log_user(THD *thd, String *str, LEX_USER *user, bool comma,
+              const char *reason);
 bool check_change_password(THD *thd, const char *host, const char *user,
                            bool retain_current_password);
 bool change_password(THD *thd, LEX_USER *user, const char *password,
@@ -1137,9 +1137,6 @@ typedef std::list<random_password_info> Userhostpassword_list;
 bool send_password_result_set(THD *thd,
                               const Userhostpassword_list &generated_passwords);
 bool lock_and_get_mandatory_roles(std::vector<Role_id> *mandatory_roles);
-bool mysql_alter_user_comment(THD *thd, const List<LEX_USER> *users,
-                              const std::string &json_blob, bool expect_text);
-
 /* helper method to check if sandbox mode should be turned off or not */
 bool turn_off_sandbox_mode(THD *thd, LEX_USER *user);
 

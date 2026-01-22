@@ -68,6 +68,7 @@
 #include "sql/dd/string_type.h"
 #include "sql/dd/types/object_table.h"  // dd::Object_table
 #include "sql/discrete_interval.h"      // Discrete_interval
+#include "sql/join_optimizer/overflow_bitset.h"
 #include "sql/key.h"
 #include "sql/sql_const.h"       // SHOW_COMP_OPTION
 #include "sql/sql_list.h"        // SQL_I_List
@@ -94,6 +95,7 @@ class THD;
 class handler;
 class partition_info;
 struct System_status_var;
+class MDL_ticket;
 
 namespace dd {
 class Properties;
@@ -1591,6 +1593,8 @@ typedef const char *(*get_tablespace_filename_ext_t)();
 /**
   Get the tablespace data from SE and insert it into Data dictionary
 
+  @deprecated Was used to upgrade from 5.7.
+
   @param    thd         Thread context
 
   @return Operation status.
@@ -1601,6 +1605,8 @@ typedef int (*upgrade_tablespace_t)(THD *thd);
 
 /**
   Get the tablespace data from SE and insert it into Data dictionary
+
+  @deprecated Was used to upgrade from 5.7.
 
   @param[in]  tablespace     tablespace object
 
@@ -1615,6 +1621,8 @@ typedef bool (*upgrade_space_version_t)(dd::Tablespace *tablespace);
   This includes resetting flags to indicate upgrade process
   and cleanup after upgrade.
 
+  @deprecated Was used to upgrade from 5.7.
+
   @param    thd      Thread context
   @param failed_upgrade True if the upgrade failed.
 
@@ -1627,6 +1635,8 @@ typedef int (*finish_upgrade_t)(THD *thd, bool failed_upgrade);
 /**
   Upgrade logs after the checkpoint from where upgrade
   process can only roll forward.
+
+  @deprecated Was used to upgrade from 5.7.
 
   @param    thd      Thread context
 
@@ -2469,6 +2479,46 @@ using secondary_engine_modify_view_ap_cost_t = bool (*)(
     THD *thd, const JoinHypergraph &hypergraph, AccessPath *access_path);
 
 /**
+  Type for signature generation and for retrieving nrows estimate
+  from secondary engine for current AccessPath.
+*/
+struct SecondaryEngineNrowsParameters {
+  /** The thread context */
+  THD *thd;
+  /** The AccessPath to retrieve Nrows for. */
+  AccessPath *access_path;
+  /** Hypergraph for current query block. */
+  const JoinHypergraph *graph;
+  /** Predicates actually applied for AccessPath::REF and other parameterized
+   * types. */
+  OverflowBitset applied_predicates{};
+  /** if ap->nrows should be acually updated. */
+  bool to_update_rows{true};
+  /** if ap->signature generation should be forced. Default behavior is to
+   * generate if ap->signature != 0. */
+  bool to_force_resign{false};
+  /** if nonnull, an additional signature should be combined with current AP. */
+  size_t *extra_sig{nullptr};
+
+  SecondaryEngineNrowsParameters(THD *thd, AccessPath *access_path,
+                                 const JoinHypergraph *graph)
+      : thd(thd), access_path(access_path), graph(graph) {}
+
+  explicit SecondaryEngineNrowsParameters(THD *thd)
+      : thd(thd), access_path(nullptr), graph(nullptr) {}
+};
+
+/**
+  Type for signature generation and for retrieving nrows estimate
+  from secondary engine for current AccessPath.
+  @param params for this function. Refer to typedef for detailed description.
+  @retval true if an updated nrow estimate is available.
+  @retval false if no nrow estimate is available.
+  */
+using secondary_engine_nrows_t =
+    bool (*)(const SecondaryEngineNrowsParameters &params);
+
+/**
   Checks whether the tables used in an explain query are loaded in the secondary
   engine.
   @param thd thread context.
@@ -2604,6 +2654,11 @@ const handlerton *SecondaryEngineHandlerton(const THD *thd);
 const handlerton *EligibleSecondaryEngineHandlerton(
     THD *thd, const LEX_CSTRING *secondary_engine_in_name);
 
+// Returns the secondary_engine_nrows hook from plugin, if plugin is install and
+// the hook is installed.
+std::optional<secondary_engine_nrows_t> RetrieveSecondaryEngineNrowsHook(
+    THD *thd);
+
 // FIXME: Temporary workaround to enable storage engine plugins to use the
 // before_commit hook. Remove after WL#11320 has been completed.
 using se_before_commit_t = void (*)(void *arg);
@@ -2632,6 +2687,23 @@ using notify_after_select_t = void (*)(THD *thd, SelectExecutedIn executed_in);
  */
 using notify_create_table_t = void (*)(struct HA_CREATE_INFO *create_info,
                                        const char *db, const char *table_name);
+
+/**
+ * Notify plugins when a materialized view is referenced in a query.
+ * The plugin is expected to check if the materialized view is available.
+ * @param[in]     thd         current thd.
+ * @param[in]     db_name     view database
+ * @param[in]     table_name  view name
+ * @param[in]     view_def    view definition query
+ *
+ * @return :
+ *  @retval true The materialized view is found and can be used.
+ *  @retval false The materialzied view is not available and cannot be used.
+ */
+using notify_materialized_view_usage_t = bool (*)(THD *thd,
+                                                  std::string_view db_name,
+                                                  std::string_view table_name,
+                                                  std::string_view view_def);
 
 /**
   Secondary engine hook called after PRIMARY_TENTATIVELY optimization is
@@ -2844,11 +2916,15 @@ struct handlerton {
   is_valid_tablespace_name_t is_valid_tablespace_name;
   alter_tablespace_t alter_tablespace;
   get_tablespace_filename_ext_t get_tablespace_filename_ext;
+  /** @deprecated Was used to upgrade from 5.7. */
   upgrade_tablespace_t upgrade_tablespace;
+  /** @deprecated Was used to upgrade from 5.7. */
   upgrade_space_version_t upgrade_space_version;
   get_tablespace_type_t get_tablespace_type;
   get_tablespace_type_by_name_t get_tablespace_type_by_name;
+  /** @deprecated Was used to upgrade from 5.7. */
   upgrade_logs_t upgrade_logs;
+  /** @deprecated Was used to upgrade from 5.7. */
   finish_upgrade_t finish_upgrade;
   fill_is_table_t fill_is_table;
   dict_init_t dict_init;
@@ -3004,6 +3080,12 @@ struct handlerton {
   /// @see secondary_engine_modify_view_ap_cost_t for function signature.
   secondary_engine_modify_view_ap_cost_t secondary_engine_modify_view_ap_cost;
 
+  /// Pointer to a function that provides nrow estimates for access paths
+  /// from secondary storage engine
+  ///
+  /// @see secondary_engine_nrows_t for function signature.
+  secondary_engine_nrows_t secondary_engine_nrows;
+
   /// Pointer to a function that returns the query offload or exec failure
   /// reason as a string given a thread context (representing the query) when
   /// the offloaded query failed in a secondary storage engine.
@@ -3054,6 +3136,8 @@ struct handlerton {
 
   notify_create_table_t notify_create_table;
   notify_drop_table_t notify_drop_table;
+
+  notify_materialized_view_usage_t notify_materialized_view_usage;
 
   /** Page tracking interface */
   Page_track_t page_track;
@@ -3166,6 +3250,10 @@ inline constexpr const decltype(handlerton::flags)
 inline bool hton_is_secondary_engine(const handlerton *hton) {
   return hton != nullptr && (hton->flags & HTON_IS_SECONDARY_ENGINE) != 0U;
 }
+
+/* Disable foreign keys in storage engine and handle it in SQL Layer. */
+inline constexpr const decltype(handlerton::flags) HTON_SUPPORTS_SQL_FK{1
+                                                                        << 25};
 
 /* Whether the secondary engine handlerton supports DDLs */
 inline bool secondary_engine_supports_ddl(const handlerton *hton) {
@@ -5159,6 +5247,53 @@ class handler {
   virtual bool bulk_load_check(THD *thd [[maybe_unused]]) const {
     return false;
   }
+
+  /** Used during bulk load on a non-empty table, called after the CSV file
+  input is exhausted and we need to copy any existing data from the original
+  table to the duplicated one.
+  @param[in]  load_ctx      SE load context
+  @param[in]  thread_idx    loader thread index
+  @param[in]  wait_cbk      stat callbacks.
+  @return 0 if successful, HA_ERR_GENERIC otherwise. */
+  virtual int bulk_load_copy_existing_data(void *load_ctx [[maybe_unused]],
+                                           size_t thread_idx [[maybe_unused]],
+                                           Bulk_load::Stat_callbacks &wait_cbk
+                                           [[maybe_unused]]) const {
+    return 0;
+  }
+
+  /** Generates a temporary table name to be used for table duplication during
+  bulk load.
+  @return a temporary table name. */
+  virtual std::string bulk_load_generate_temporary_table_name() const {
+    return "";
+  }
+
+  /** Sets the source table data (table name and key range boundaries) for all
+  loaders.
+  @param[in,out]  load_ctx                SE load context
+  @param[in]      source_table_data  vector containing the source table data
+  @return true if successful, false otherwise. */
+  virtual bool bulk_load_set_source_table_data(
+      void *load_ctx [[maybe_unused]],
+      const std::vector<Bulk_load::Source_table_data> &source_table_data
+      [[maybe_unused]]) const {
+    return true;
+  }
+
+  /** Get the row ID range of the table that we're bulk loading into. Only used
+  when the table has a generated clustered index and is not empty.
+  @param[out] min Minimum ROW_ID in table
+  @param[out] max Maximum ROW_ID in table
+  @return true if successful, false otherwise. */
+  virtual bool bulk_load_get_row_id_range(size_t &min [[maybe_unused]],
+                                          size_t &max [[maybe_unused]]) const {
+    return false;
+  }
+
+  /** Determines whether the table this handler was opened on is empty.
+  @return true if table empty. */
+  virtual bool is_table_empty() const { return false; }
 
   /** Get the total memory available for bulk load in SE.
    @param[in] thd user session
@@ -7272,13 +7407,16 @@ class handler {
                           needs to be calculated is a typed array field, it
                           will contain pointer to field's calculated value.
     @param[out]           mv_length Length of the data above
+    @param[in] include_stored_gcols  if true, evaluate both stored and virtual
+                          gcols.  if false, evaluate only virtual gcol.
 
     @retval true in case of error
     @retval false on success
   */
   static bool my_eval_gcolumn_expr(THD *thd, TABLE *table,
                                    const MY_BITMAP *const fields, uchar *record,
-                                   const char **mv_data_ptr, ulong *mv_length);
+                                   const char **mv_data_ptr, ulong *mv_length,
+                                   bool include_stored_gcols);
 
   /* This must be implemented if the handlerton's partition_flags() is set. */
   virtual Partition_handler *get_partition_handler() { return nullptr; }

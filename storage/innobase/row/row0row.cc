@@ -245,6 +245,12 @@ dtuple_t *row_build_index_entry_low(const dtuple_t *row, const row_ext_t *ext,
 
     dfield_copy(dfield, dfield2);
 
+    if (!index->is_clustered()) {
+      /* Fields based on virtual columns in secondary indexes are
+      not themselves virtual */
+      dfield->type.prtype &= ~DATA_VIRTUAL;
+    }
+
     if (dfield_is_null(dfield)) {
       continue;
     }
@@ -592,11 +598,7 @@ dtuple_t *row_rec_to_index_entry_low(
 
   ut_ad(rec_len == dict_index_get_n_fields(index) ||
         /* non-leaf record which has keys and child page no as record data */
-        rec_len == dict_index_get_n_unique(index) + 1U
-        /* a record for older SYS_INDEXES table
-        (missing merge_threshold column) is acceptable. */
-        || (index->table->id == DICT_INDEXES_ID &&
-            rec_len == dict_index_get_n_fields(index) - 1U));
+        rec_len == dict_index_get_n_unique(index) + 1U);
 
   dict_index_copy_types(entry, index, rec_len);
 
@@ -613,6 +615,7 @@ dtuple_t *row_rec_to_index_entry_low(
   }
 
   ut_ad(dtuple_check_typed(entry));
+  ut_d(entry->validate_for_index(index));
 
   return (entry);
 }

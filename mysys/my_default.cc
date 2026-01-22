@@ -55,25 +55,32 @@
 #include "my_config.h"
 
 #include <fcntl.h>
+#include <string.h>
+#include <sys/stat.h>
 #include <sys/types.h>
+#include <cassert>
 #include <cstdio>
 #include <cstdlib>
+#include <memory>
+#include <utility>
 
 #include "m_string.h"
 #include "my_aes.h"
 #include "my_alloc.h"
 #include "my_byteorder.h"
-#include "my_compiler.h"
 #include "my_dbug.h"
 #include "my_default.h"
 #include "my_dir.h"
 #include "my_getopt.h"
 #include "my_inttypes.h"
 #include "my_io.h"
-#include "my_macros.h"
 #include "my_psi_config.h"
+#include "my_sys.h"
+#include "mysql/attribute.h"
+#include "mysql/components/services/system_variable_source_type.h"
 #include "mysql/my_loglevel.h"
 #include "mysql/psi/mysql_file.h"
+#include "mysql/psi/psi_memory.h"
 #include "mysql/strings/m_ctype.h"
 #include "mysql_version.h"  // MYSQL_PERSIST_CONFIG_NAME
 #include "mysys/my_default_priv.h"
@@ -875,15 +882,13 @@ static char *get_argument(const char *keyword, size_t kwlen, char *ptr,
   for (ptr += kwlen - 1; my_isspace(&my_charset_latin1, ptr[0]); ptr++) {
   }
 
-  /*
-    Trim trailing whitespace from directory name
-    The -1 below is for the newline added by fgets()
-    Note that my_isspace() is true for \r and \n
-  */
-  for (end = ptr + strlen(ptr) - 1; my_isspace(&my_charset_latin1, *(end - 1));
-       end--) {
+  // trim the comment at the end of the line
+  end = remove_end_comment(ptr);
+  // trim the whitespace prior to the comment at the end of the line, if any
+  if (end > ptr) {
+    while (my_isspace(&my_charset_latin1, *(end - 1))) end--;
+    end[0] = 0;
   }
-  end[0] = 0; /* Cut off end space */
 
   /* Print error msg if there is nothing after !include* directive */
   if (end <= ptr) {

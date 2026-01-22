@@ -31,6 +31,7 @@ this program; if not, write to the Free Software Foundation, Inc.,
  Created 12/27/1996 Heikki Tuuri
  *******************************************************/
 
+#include <sql/sql_thd_internal_api.h>
 #include <sys/types.h>
 
 #include "dict0dict.h"
@@ -370,10 +371,9 @@ bool row_upd_changes_field_size_or_external(
   for (i = 0; i < n_fields; i++) {
     upd_field = upd_get_nth_field(update, i);
 
-    /* We should ignore virtual field if the index is not
-    a virtual index */
-    if (upd_fld_is_virtual_col(upd_field) &&
-        dict_index_has_virtual(index) != DICT_VIRTUAL) {
+    /* We should ignore virtual field updates (updates to materialized
+    virtual columns are not considered to be virtual field updates). */
+    if (upd_field->is_virtual()) {
       continue;
     }
 
@@ -481,6 +481,7 @@ void row_upd_rec_in_place(
 
   ut_ad(rec_offs_validate(rec, index, offsets));
   ut_ad(!index->table->skip_alter_undo);
+  ut_d(update->validate_for_index(index));
 
   if (rec_offs_comp(offsets)) {
     /* Keep the INSTANT/VERSION bit of prepared physical record */
@@ -520,7 +521,7 @@ void row_upd_rec_in_place(
     upd_field = upd_get_nth_field(update, i);
 
     /* No need to update virtual columns for non-virtual index */
-    if (upd_fld_is_virtual_col(upd_field) && !dict_index_has_virtual(index)) {
+    if (upd_field->is_virtual()) {
       continue;
     }
 
@@ -607,9 +608,11 @@ void row_upd_index_write_log(dict_index_t *index, const upd_t *update,
   for (i = 0; i < n_fields; i++) {
     upd_field = upd_get_nth_field(update, i);
 
-    /* No need to log virtual columns for non-virtual index, since
-    in this case row_upd_rec_inplace() won't apply this kind of redo log. */
-    if (upd_fld_is_virtual_col(upd_field) && !dict_index_has_virtual(index)) {
+    /* No need to log virtual field updates (updates to virtual columns
+    which are not materialized in given index), since in this case
+    row_upd_rec_inplace() won't apply this kind of redo log. */
+    if (upd_field->is_virtual()) {
+      ut_ad(index->is_clustered());
       continue;
     }
 
@@ -631,7 +634,8 @@ void row_upd_index_write_log(dict_index_t *index, const upd_t *update,
 
     upd_field = upd_get_nth_field(update, i);
 
-    if (upd_fld_is_virtual_col(upd_field) && !dict_index_has_virtual(index)) {
+    if (upd_field->is_virtual()) {
+      ut_ad(index->is_clustered());
       continue;
     }
 
@@ -639,13 +643,7 @@ void row_upd_index_write_log(dict_index_t *index, const upd_t *update,
 
     len = dfield_get_len(new_val);
 
-    /* If this is a virtual column, mark it using special
-    field_no */
-    ulint field_no = upd_fld_is_virtual_col(upd_field)
-                         ? REC_MAX_N_FIELDS + upd_field->field_no
-                         : upd_field->field_no;
-
-    log_ptr += mach_write_compressed(log_ptr, field_no);
+    log_ptr += mach_write_compressed(log_ptr, upd_field->field_no);
     log_ptr += mach_write_compressed(log_ptr, len);
 
     if (len != UNIV_SQL_NULL) {
@@ -670,14 +668,9 @@ void row_upd_index_write_log(dict_index_t *index, const upd_t *update,
 }
 #endif /* !UNIV_HOTBACKUP */
 
-/** Parses the log data written by row_upd_index_write_log.
- @return log data end or NULL */
-byte *row_upd_index_parse(const byte *ptr,     /*!< in: buffer */
-                          const byte *end_ptr, /*!< in: buffer end */
-                          mem_heap_t *heap,    /*!< in: memory heap where update
-                                               vector is    built */
-                          upd_t **update_out)  /*!< out: update vector */
-{
+byte *row_upd_index_parse(const byte *ptr, const byte *end_ptr,
+                          mem_heap_t *heap, upd_t **update_out,
+                          dict_index_t *index) {
   upd_t *update;
   upd_field_t *upd_field;
   dfield_t *new_val;
@@ -712,11 +705,14 @@ byte *row_upd_index_parse(const byte *ptr,     /*!< in: buffer */
       return (nullptr);
     }
 
-    /* Check if this is a virtual column, mark the prtype
-    if that is the case */
+    /* In some previous versions for materialized virtual fields the
+    field_no contained a special value being the virtual column number +
+    REC_MAX_N_FIELDS instead of actual field position.
+    TODO: Remove in 10.x, as after 9.5.0, 8.4.7 we no longer produce
+    updates in this format. */
     if (field_no >= REC_MAX_N_FIELDS) {
-      new_val->type.prtype |= DATA_VIRTUAL;
-      field_no -= REC_MAX_N_FIELDS;
+      auto vcol_no = field_no - REC_MAX_N_FIELDS;
+      field_no = index->get_col_pos(vcol_no, true, true);
     }
 
     upd_field->field_no = field_no;
@@ -739,9 +735,10 @@ byte *row_upd_index_parse(const byte *ptr,     /*!< in: buffer */
     }
   }
 
+  ut_d(update->validate());
   *update_out = update;
 
-  return (const_cast<byte *>(ptr));
+  return const_cast<byte *>(ptr);
 }
 
 #ifndef UNIV_HOTBACKUP
@@ -756,7 +753,6 @@ upd_t *row_upd_build_sec_rec_difference_binary(
     const dtuple_t *entry, /*!< in: entry to insert */
     mem_heap_t *heap)      /*!< in: memory heap from which allocated */
 {
-  upd_field_t *upd_field;
   const dfield_t *dfield;
   const byte *data;
   ulint len;
@@ -792,7 +788,7 @@ upd_t *row_upd_build_sec_rec_difference_binary(
     (No collation) */
 
     if (!dfield_data_is_binary_equal(dfield, len, data)) {
-      upd_field = upd_get_nth_field(update, n_diff);
+      upd_field_t *const upd_field = upd_get_nth_field(update, n_diff);
 
       dfield_copy(&(upd_field->new_val), dfield);
 
@@ -803,6 +799,7 @@ upd_t *row_upd_build_sec_rec_difference_binary(
   }
 
   update->n_fields = n_diff;
+  ut_d(update->validate_for_index(index));
 
   return (update);
 }
@@ -829,6 +826,7 @@ upd_t *row_upd_build_difference_binary(dict_index_t *index,
                                        const ulint *offsets, bool no_sys,
                                        trx_t *trx, mem_heap_t *heap,
                                        TABLE *mysql_table, dberr_t *error) {
+  ut_d(entry->validate_for_index(index));
   upd_field_t *upd_field;
   dfield_t *dfield;
   const byte *data;
@@ -961,7 +959,7 @@ upd_t *row_upd_build_difference_binary(dict_index_t *index,
   }
 
   update->n_fields = n_diff;
-  ut_ad(update->validate());
+  ut_d(update->validate_for_index(index));
 
   return update;
 }
@@ -1115,15 +1113,13 @@ void row_upd_index_replace_new_col_vals_index_pos(dtuple_t *entry,
   DBUG_TRACE;
   ut_ad(index);
   ut_ad(!index->table->skip_alter_undo);
+  ut_d(update->validate_for_index(index));
 
   dtuple_set_info_bits(entry, update->info_bits);
 
   const ulint n_fields = order_only ? dict_index_get_n_unique(index)
                                     : dict_index_get_n_fields(index);
   for (ulint field_index = 0; field_index < n_fields; field_index++) {
-    ulint field_no;
-    bool is_virtual{false};
-
     const dict_field_t *field = index->get_field(field_index);
     const dict_col_t *col = field->col;
 
@@ -1133,14 +1129,7 @@ void row_upd_index_replace_new_col_vals_index_pos(dtuple_t *entry,
       continue;
     }
 
-    if (col->is_virtual()) {
-      is_virtual = true;
-      field_no = reinterpret_cast<const dict_v_col_t *>(col)->v_pos;
-    } else {
-      field_no = field_index;
-    }
-
-    if (auto uf = upd_get_field_by_field_no(update, field_no, is_virtual); uf) {
+    if (auto uf = upd_get_field_by_field_no(update, field_index, false); uf) {
       upd_field_t *tmp = const_cast<upd_field_t *>(uf);
       dfield_t *dfield = dtuple_get_nth_field(entry, field_index);
       tmp->ext_in_old = dfield_is_ext(dfield);
@@ -1152,6 +1141,7 @@ void row_upd_index_replace_new_col_vals_index_pos(dtuple_t *entry,
                                         dict_index_is_sdi(index), page_size);
     }
   }
+  ut_d(entry->validate_for_index(index));
 }
 
 /** Replaces the new column values stored in the update vector to the index
@@ -1224,14 +1214,10 @@ a update vector.
 void row_upd_replace_vcol(dtuple_t *row, const dict_table_t *table,
                           const upd_t *update, bool upd_new, dtuple_t *undo_row,
                           const byte *ptr) {
-  ulint col_no;
-  ulint i;
-  ulint n_cols;
-
   ut_ad(!table->skip_alter_undo);
 
-  n_cols = dtuple_get_n_v_fields(row);
-  for (col_no = 0; col_no < n_cols; col_no++) {
+  const auto n_cols = dtuple_get_n_v_fields(row);
+  for (ulint col_no = 0; col_no < n_cols; col_no++) {
     dfield_t *dfield;
 
     const dict_v_col_t *col = dict_table_get_nth_v_col(table, col_no);
@@ -1252,13 +1238,9 @@ void row_upd_replace_vcol(dtuple_t *row, const dict_table_t *table,
 
     dfield = dtuple_get_nth_v_field(row, col_no);
 
-    for (i = 0; i < upd_get_n_fields(update); i++) {
-      const upd_field_t *upd_field = upd_get_nth_field(update, i);
-      if (!upd_fld_is_virtual_col(upd_field) ||
-          upd_field->field_no != col->v_pos) {
-        continue;
-      }
-
+    const upd_field_t *const upd_field =
+        upd_get_field_by_field_no(update, col->v_pos, true);
+    if (upd_field) {
       if (upd_new) {
         dfield_copy_data(dfield, &upd_field->new_val);
       } else {
@@ -1269,7 +1251,6 @@ void row_upd_replace_vcol(dtuple_t *row, const dict_table_t *table,
       dfield_get_type(dfield)->prtype = upd_field->new_val.type.prtype;
       dfield_get_type(dfield)->mbminmaxlen =
           upd_field->new_val.type.mbminmaxlen;
-      break;
     }
   }
 
@@ -1303,7 +1284,6 @@ void row_upd_replace_vcol(dtuple_t *row, const dict_table_t *table,
         first_v_col = false;
         if (field_no != ULINT_UNDEFINED) {
           vcol = dict_table_get_nth_v_col(table, field_no);
-          col_no = dict_col_get_no(&vcol->m_col);
           dfield = dtuple_get_nth_v_field(row, vcol->v_pos);
         }
       }
@@ -1365,7 +1345,7 @@ void row_upd_replace(dtuple_t *row, row_ext_t **ext, const dict_index_t *index,
   ut_ad(index->is_clustered());
   ut_ad(update);
   ut_ad(heap);
-  ut_ad(update->validate());
+  ut_d(update->validate_for_index(index));
   ut_ad(!index->table->skip_alter_undo);
 
   n_cols = dtuple_get_n_fields(row);
@@ -1393,8 +1373,7 @@ void row_upd_replace(dtuple_t *row, row_ext_t **ext, const dict_index_t *index,
     for (i = 0; i < upd_get_n_fields(update); i++) {
       const upd_field_t *upd_field = upd_get_nth_field(update, i);
 
-      if (upd_field->field_no != clust_pos ||
-          upd_fld_is_virtual_col(upd_field)) {
+      if (upd_field->field_no != clust_pos || upd_field->is_virtual()) {
         continue;
       }
 
@@ -1415,6 +1394,7 @@ void row_upd_replace(dtuple_t *row, row_ext_t **ext, const dict_index_t *index,
   }
 
   row_upd_replace_vcol(row, table, update, true, nullptr, nullptr);
+  ut_d(row->validate_for_index(index));
 }
 
 bool row_upd_changes_ord_field_binary_func(dict_index_t *index,
@@ -1662,7 +1642,7 @@ bool row_upd_changes_some_index_ord_field_binary(
   for (i = 0; i < upd_get_n_fields(update); i++) {
     upd_field = upd_get_nth_field(update, i);
 
-    if (upd_fld_is_virtual_col(upd_field)) {
+    if (upd_field->is_virtual()) {
       if (dict_table_get_nth_v_col(index->table, upd_field->field_no)
               ->m_col.ord_part) {
         return true;
@@ -1696,20 +1676,15 @@ bool row_upd_changes_doc_id(dict_table_t *table,    /*!< in: table */
 
   return (col_no == fts->doc_col);
 }
-/** Checks if an FTS indexed column is affected by an UPDATE.
- @return offset within fts_t::indexes if FTS indexed column updated else
- ULINT_UNDEFINED */
-ulint row_upd_changes_fts_column(
-    dict_table_t *table,    /*!< in: table */
-    upd_field_t *upd_field) /*!< in: field to check */
-{
+
+ulint row_upd_changes_fts_column(dict_table_t *table, upd_field_t *upd_field) {
   ulint col_no;
   dict_index_t *clust_index;
   fts_t *fts = table->fts;
 
   ut_ad(!table->skip_alter_undo);
 
-  if (upd_fld_is_virtual_col(upd_field)) {
+  if (upd_field->is_virtual()) {
     col_no = upd_field->field_no;
     return (dict_table_is_fts_column(fts->indexes, col_no, true));
   } else {
@@ -2358,7 +2333,8 @@ code or DB_LOCK_WAIT */
 
       ut_ad(err == DB_SUCCESS);
 
-      if (referenced) {
+      if (!thd_is_sql_fk_checks_enabled() && referenced) {
+        DBUG_PRINT("fk", ("InnoDB FK on table %s", index->table->name.m_name));
         ulint *offsets;
 
         offsets = rec_get_offsets(rec, index, nullptr, ULINT_UNDEFINED,
@@ -2661,7 +2637,8 @@ static inline bool row_upd_clust_rec_by_insert_inherit(
         }
       }
     check_fk:
-      if (referenced) {
+      if (!thd_is_sql_fk_checks_enabled() && referenced) {
+        DBUG_PRINT("fk", ("InnoDB FK on table %s", table->name.m_name));
         /* NOTE that the following call loses
         the position of pcur ! */
 
@@ -2699,8 +2676,7 @@ uint64_t row_upd_get_new_autoinc_counter(const upd_t *update,
   for (ulint i = 0; i < n_fields; ++i) {
     const upd_field_t *upd_field = upd_get_nth_field(update, i);
 
-    if (upd_field->field_no == autoinc_field_no &&
-        !upd_fld_is_virtual_col(upd_field)) {
+    if (upd_field->field_no == autoinc_field_no && !upd_field->is_virtual()) {
       /* We should double check the field to see if this
       is a virtual column, which is on virtual index
       instead of clustered index */
@@ -3000,7 +2976,8 @@ func_exit:
   err = btr_cur_del_mark_set_clust_rec(flags, btr_cur_get_block(btr_cur),
                                        btr_cur_get_rec(btr_cur), index, offsets,
                                        thr, node->row, mtr);
-  if (err == DB_SUCCESS && referenced) {
+  if (err == DB_SUCCESS && !thd_is_sql_fk_checks_enabled() && referenced) {
+    DBUG_PRINT("fk", ("InnoDB FK on table %s", index->table->name.m_name));
     /* NOTE that the following call loses the position of pcur ! */
 
     err = row_upd_check_references_constraints(node, pcur, index->table, index,
@@ -3068,7 +3045,6 @@ func_exit:
   DEBUG_SYNC(trx->mysql_thd, "innodb_row_upd_clust_step_enter");
 
   if (dict_index_is_online_ddl(index)) {
-    ut_ad(node->table->id != DICT_INDEXES_ID);
     mode = BTR_MODIFY_LEAF | BTR_ALREADY_S_LATCHED;
     mtr_s_lock(dict_index_get_lock(index), &mtr, UT_LOCATION_HERE);
   } else {
@@ -3453,13 +3429,8 @@ std::ostream &upd_t::print_puvect(std::ostream &out, upd_field_t *uf) const {
 
 const upd_field_t *upd_t::get_field_by_field_no(
     ulint field_no, const dict_index_t *index) const {
-  const dict_field_t *const field = index->get_field(field_no);
-  const dict_col_t *const col = field->col;
-
-  if (col->is_virtual()) {
-    const auto vcol = reinterpret_cast<const dict_v_col_t *>(col);
-    return upd_get_field_by_field_no(this, vcol->v_pos, true);
-  }
+  ut_ad(!(index->is_clustered() &&
+          index->get_field(field_no)->col->is_virtual()));
 
   return upd_get_field_by_field_no(this, field_no, false);
 }

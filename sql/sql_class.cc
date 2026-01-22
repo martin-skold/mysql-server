@@ -906,6 +906,10 @@ THD::THD(bool enable_plugins)
   if (events_cache_ == nullptr || !events_cache_->valid()) {
     /*ToDo: Raise warning */
   }
+
+  // Initialize based on the global system startup variable
+  if (!innodb_native_foreign_keys)
+    variables.option_bits |= OPTION_USE_SQL_FOREIGN_KEY_HANDLING;
 }
 
 void THD::store_cached_properties(cached_properties prop_mask) {
@@ -949,7 +953,6 @@ void THD::set_eligible_secondary_engine_handlerton(handlerton *hton) {
 
 void THD::cleanup_after_statement_execution() {
   set_secondary_engine_statement_context(nullptr);
-  m_eligible_secondary_engine_handlerton = nullptr;
 }
 
 bool THD::set_db(const LEX_CSTRING &new_db) {
@@ -1235,6 +1238,15 @@ void THD::set_new_thread_id() {
   thr_lock_info_init(&lock_info, m_thread_id, &COND_thr_lock);
 }
 
+void THD::set_protocol_dependent_variables(Protocol *proto) {
+  assert(proto != nullptr);
+
+  if (proto->has_client_capability(CLIENT_INTERACTIVE))
+    variables.net_wait_timeout = variables.net_interactive_timeout;
+  if (proto->has_client_capability(CLIENT_IGNORE_SPACE))
+    variables.sql_mode |= MODE_IGNORE_SPACE;
+}
+
 /*
   Do what's needed when one invokes change user
 
@@ -1262,6 +1274,7 @@ void THD::cleanup_connection(void) {
   running_explain_analyze = false;
   m_thd_life_cycle_stage = enum_thd_life_cycle_stages::ACTIVE;
   init();
+  set_protocol_dependent_variables(m_protocol);
   stmt_map.reset();
   user_vars.clear();
   sp_cache_clear(&sp_proc_cache);
@@ -1908,6 +1921,8 @@ void THD::cleanup_after_query() {
   // Cleanup and free items that were created during this execution
   cleanup_items(item_list());
   free_items();
+  m_eligible_secondary_engine_handlerton = nullptr;
+
   /* Reset where. */
   where = THD::DEFAULT_WHERE;
   /* reset table map for multi-table update */
@@ -1917,7 +1932,9 @@ void THD::cleanup_after_query() {
   if (lex) {
     lex->mi.repl_ignore_server_ids.clear();
   }
-  if (rli_slave) rli_slave->cleanup_after_query();
+  if (rli_slave) {
+    rli_slave->cleanup_after_query();
+  }
   // Set the default "cute" mode for the execution environment:
   check_for_truncated_fields = CHECK_FIELD_IGNORE;
 }
@@ -3851,4 +3868,9 @@ const Cost_model_server *THD::cost_model() const {
   } else {
     return &m_cost_model;
   }
+}
+
+bool use_sql_fk_checks_for_table(THD *thd, TABLE *table) {
+  return ((table->s->db_type()->flags & HTON_SUPPORTS_SQL_FK) &&
+          is_sql_fk_checks_enabled(thd));
 }

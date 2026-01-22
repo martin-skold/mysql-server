@@ -25,6 +25,7 @@
 #include <sstream>
 
 #include <mysql/components/services/log_builtins.h>
+#include <mysql/components/services/mysql_timestamp.h>
 #include <mysql/service_rpl_transaction_write_set.h>
 #include "mutex_lock.h"
 #include "my_dbug.h"
@@ -162,6 +163,9 @@ Compatibility_module *compatibility_mgr = nullptr;
 SERVICE_TYPE_NO_CONST(mysql_runtime_error) *mysql_runtime_error_service =
     nullptr;
 
+/* Timestamp service */
+SERVICE_TYPE_NO_CONST(mysql_timestamp) *mysql_timestamp_service = nullptr;
+
 Consensus_leaders_handler *consensus_leaders_handler = nullptr;
 Recovery_metadata_observer *recovery_metadata_observer = nullptr;
 
@@ -226,10 +230,6 @@ static void check_deprecated_variables() {
       strcmp(ov.view_change_uuid_var, "AUTOMATIC")) {
     push_deprecated_warn_no_replacement(thd,
                                         "group_replication_view_change_uuid");
-  }
-  if (ov.allow_local_lower_version_join_var) {
-    push_deprecated_warn_no_replacement(
-        thd, "group_replication_allow_local_lower_version_join");
   }
 }
 
@@ -2081,6 +2081,14 @@ int plugin_group_replication_init(MYSQL_PLUGIN plugin_info) {
       reinterpret_cast<SERVICE_TYPE_NO_CONST(mysql_runtime_error) *>(
           h_mysql_runtime_error_service);
 
+  // Initialize timestamp service.
+  my_h_service h_mysql_timestamp_service = nullptr;
+  if (lv.reg_srv->acquire("mysql_timestamp", &h_mysql_timestamp_service))
+    return 1; /* purecov: inspected */
+  mysql_timestamp_service =
+      reinterpret_cast<SERVICE_TYPE_NO_CONST(mysql_timestamp) *>(
+          h_mysql_timestamp_service);
+
   /*
     Acquire required server services once at plugin install.
   */
@@ -2402,6 +2410,12 @@ int plugin_group_replication_deinit(void *p) {
   lv.plugin_info_ptr = nullptr;
 
   server_services_references_finalize();
+
+  // Deinitialize timestamp service.
+  my_h_service h_mysql_timestamp_service =
+      reinterpret_cast<my_h_service>(mysql_timestamp_service);
+  lv.reg_srv->release(h_mysql_timestamp_service);
+  mysql_timestamp_service = nullptr;
 
   // Deinitialize runtime error service.
   my_h_service h_mysql_runtime_error_service =
@@ -2915,11 +2929,6 @@ bool server_engine_initialized() {
 
 void register_server_reset_master() { lv.known_server_reset = true; }
 
-bool get_allow_local_lower_version_join() {
-  DBUG_TRACE;
-  return ov.allow_local_lower_version_join_var;
-}
-
 ulong get_transaction_size_limit() {
   DBUG_TRACE;
   return ov.transaction_size_limit_var;
@@ -2986,13 +2995,6 @@ static int check_if_server_properly_configured() {
   }
 
   if (startup_pre_reqs.parallel_applier_workers > 0) {
-    if (startup_pre_reqs.parallel_applier_type !=
-        CHANNEL_MTS_PARALLEL_TYPE_LOGICAL_CLOCK) {
-      LogPluginErr(ERROR_LEVEL,
-                   ER_GRP_RPL_INCORRECT_TYPE_SET_FOR_PARALLEL_APPLIER);
-      return 1;
-    }
-
     if (!startup_pre_reqs.parallel_applier_preserve_commit_order) {
       LogPluginErr(WARNING_LEVEL,
                    ER_GRP_RPL_REPLICA_PRESERVE_COMMIT_ORDER_NOT_SET);
@@ -3984,23 +3986,6 @@ static int check_enforce_update_everywhere_checks(
   return 0;
 }
 
-static int check_allow_local_lower_version_join(MYSQL_THD thd, SYS_VAR *,
-                                                void *save,
-                                                struct st_mysql_value *value) {
-  DBUG_TRACE;
-  bool allow_local_lower_version_join_val;
-
-  push_deprecated_warn_no_replacement(
-      thd, "group_replication_allow_local_lower_version_join");
-
-  if (!get_bool_value_using_type_lib(value, allow_local_lower_version_join_val))
-    return 1;
-
-  *(bool *)save = allow_local_lower_version_join_val;
-
-  return 0;
-}
-
 static int check_communication_debug_options(MYSQL_THD thd, SYS_VAR *,
                                              void *save,
                                              struct st_mysql_value *value) {
@@ -4575,7 +4560,7 @@ static MYSQL_SYSVAR_BOOL(recovery_use_ssl,        /* name */
                          "Replication recovery process.",
                          check_sysvar_bool, /* check func*/
                          update_ssl_use,    /* update func*/
-                         0);                /* default*/
+                         1);                /* default*/
 
 static MYSQL_SYSVAR_STR(
     recovery_ssl_ca,        /* name */
@@ -4748,19 +4733,6 @@ static MYSQL_SYSVAR_ULONG(
     0                           /* block */
 );
 
-// Allow member downgrade
-
-static MYSQL_SYSVAR_BOOL(allow_local_lower_version_join,        /* name */
-                         ov.allow_local_lower_version_join_var, /* var */
-                         PLUGIN_VAR_OPCMDARG |
-                             PLUGIN_VAR_PERSIST_AS_READ_ONLY, /* optional var */
-                         "Allow this server to join the group even if it has a "
-                         "lower plugin version than the group",
-                         check_allow_local_lower_version_join, /* check func. */
-                         nullptr,                              /* update func*/
-                         0                                     /* default */
-);
-
 static MYSQL_SYSVAR_ULONG(
     auto_increment_increment,        /* name */
     ov.auto_increment_increment_var, /* var */
@@ -4826,10 +4798,10 @@ static MYSQL_SYSVAR_ENUM(
     ov.ssl_mode_var,                                       /* var */
     PLUGIN_VAR_OPCMDARG | PLUGIN_VAR_PERSIST_AS_READ_ONLY, /* optional var */
     "Specifies the security state of the connection between Group "
-    "Replication members. Default: DISABLED",
+    "Replication members. Default: REQUIRED",
     nullptr,                      /* check func. */
     nullptr,                      /* update func. */
-    0,                            /* default */
+    1,                            /* default */
     &ov.ssl_mode_values_typelib_t /* type lib */
 );
 
@@ -5415,7 +5387,6 @@ static SYS_VAR *group_replication_system_vars[] = {
     MYSQL_SYSVAR(recovery_compression_algorithms),
     MYSQL_SYSVAR(recovery_zstd_compression_level),
     MYSQL_SYSVAR(components_stop_timeout),
-    MYSQL_SYSVAR(allow_local_lower_version_join),
     MYSQL_SYSVAR(auto_increment_increment),
     MYSQL_SYSVAR(compression_threshold),
     MYSQL_SYSVAR(communication_max_message_size),

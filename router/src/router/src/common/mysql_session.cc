@@ -34,7 +34,9 @@
 #include <sstream>
 #include <string>
 
+#include "my_sys.h"
 #include "mysql.h"
+#include "mysql/harness/net_ts/internet.h"
 #include "violite.h"
 
 #include "mysql/harness/logging/logger.h"
@@ -390,8 +392,18 @@ void MySQLSession::connect(const std::string &host, unsigned int port,
   const unsigned long client_flags =
       (CLIENT_LONG_PASSWORD | CLIENT_LONG_FLAG | CLIENT_PROTOCOL_41 |
        CLIENT_MULTI_RESULTS | extra_client_flags);
-  std::string endpoint_str =
-      !unix_socket.empty() ? unix_socket : host + ":" + std::to_string(port);
+  std::string endpoint_str;
+
+  if (!unix_socket.empty()) {
+    endpoint_str = unix_socket;
+  } else {
+    if (net::ip::make_address_v6(host.c_str())) {
+      endpoint_str = "[" + host + "]";
+    } else {
+      endpoint_str = host;
+    }
+    endpoint_str += ":" + std::to_string(port);
+  }
 
   const bool ssl_disabled = ssl_mode() == SSL_MODE_DISABLED;
   auto &ssl_sessions_cache = SSLSessionsCache::instance();
@@ -499,7 +511,9 @@ const std::error_category &mysql_category() noexcept {
   class category_impl : public std::error_category {
    public:
     const char *name() const noexcept override { return "mysql_client"; }
-    std::string message(int ev) const override { return ER_CLIENT(ev); }
+    std::string message(int ev) const override {
+      return ev ? my_get_err_msg(ev) : my_get_err_msg(CR_UNKNOWN_ERROR);
+    }
   };
 
   static category_impl instance;
@@ -507,7 +521,7 @@ const std::error_category &mysql_category() noexcept {
 }
 
 static MysqlError make_mysql_error_code(unsigned int e) {
-  return {e, ER_CLIENT(e), "HY000"};
+  return {e, e ? my_get_err_msg(e) : my_get_err_msg(CR_UNKNOWN_ERROR), "HY000"};
 }
 
 static MysqlError make_mysql_error_code(MYSQL *m) {

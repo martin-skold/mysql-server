@@ -30,9 +30,17 @@ INSERT INTO t3 VALUES
 INSERT INTO t3 SELECT f1 + 20, f2, f3 FROM t3;
 INSERT INTO t3 SELECT f1 + 40, f2, f3 FROM t3;
 
-ANALYZE TABLE t1;
-ANALYZE TABLE t2;
-ANALYZE TABLE t3;
+CREATE TABLE t4 (f1 INT NOT NULL, f2 INT, f3 INT,
+PRIMARY KEY(f1), KEY f2_idx(f1), KEY f3_idx(f3));
+
+INSERT INTO t4
+WITH RECURSIVE t(n) AS (
+    SELECT 0 AS i UNION ALL
+    SELECT n + 1 FROM t WHERE n + 1 < 100
+)
+SELECT n, n, 0  FROM t;
+
+ANALYZE TABLE t1, t2, t3, t4;
 
 
 --echo # NO_RANGE_OPTIMIZATION hint testing
@@ -57,7 +65,7 @@ EXPLAIN SELECT /*+ NO_RANGE_OPTIMIZATION(t3 PRIMARY) */ f1 FROM t3 WHERE f1 > 30
 --echo # Turn off range access for PRIMARY & f2_idx keys
 --echo # Should use skip scan for f3_idx index
 --replace_regex $elide_costs
-EXPLAIN SELECT /*+ NO_RANGE_OPTIMIZATION(t3 PRIMARY, f2_idx) */ f1 FROM t3 WHERE f1 > 30 AND f1 < 33;
+EXPLAIN SELECT /*+ NO_RANGE_OPTIMIZATION(t4 PRIMARY, f2_idx) */ f1 FROM t4 WHERE f1 > 30 AND f1 < 33;
 --echo # Turn off range access for all keys
 --echo # Should use index access
 --replace_regex $elide_costs
@@ -65,7 +73,7 @@ EXPLAIN SELECT /*+ NO_RANGE_OPTIMIZATION(t3) */ f1 FROM t3 WHERE f1 > 30 AND f1 
 --echo # Turn off range access for PRIMARY & f2_idx keys
 --echo # Should use index access
 --replace_regex $elide_costs
-EXPLAIN SELECT /*+ NO_RANGE_OPTIMIZATION(t3 PRIMARY) NO_RANGE_OPTIMIZATION(t3 f2_idx) */ f1 FROM t3 WHERE f1 > 30 AND f1 < 33;
+EXPLAIN SELECT /*+ NO_RANGE_OPTIMIZATION(t4 PRIMARY) NO_RANGE_OPTIMIZATION(t4 f2_idx) */ f1 FROM t4 WHERE f1 > 30 AND f1 < 33;
 
 --echo # NO_ICP hint testing
 set optimizer_switch='index_condition_pushdown=on';
@@ -365,6 +373,7 @@ SHOW STATUS LIKE 'handler_read%';
 
 --echo # Check statistics with hint
 FLUSH STATUS;
+--sorted_result
 SELECT /*+ NO_BNL() */t1.* FROM t1,t2,t3;
 SHOW STATUS LIKE 'handler_read%';
 
@@ -1257,6 +1266,7 @@ CREATE TABLE t2 (
 );
 INSERT INTO t1 values(NULL, '');
 INSERT INTO t2 VALUES ('486878','WDT'),('486910','WDT');
+ANALYZE TABLE t1, t2;
 --replace_regex $elide_costs
 EXPLAIN FORMAT=TREE SELECT avg(t2.f1) FROM t1, t2 where t2.f2 = 'SIR' GROUP BY t1.f1;
 
@@ -1321,6 +1331,6 @@ FROM t3
 WHERE c1=1 and c2=9;
 
 DROP view v1;
-DROP TABLE t1,t3;
+DROP TABLE t1,t3,t4;
 
 --echo #

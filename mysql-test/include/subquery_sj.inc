@@ -9,6 +9,7 @@
 # off cost-based choice for them.
 set @old_opt_switch=@@optimizer_switch;
 set optimizer_switch='subquery_materialization_cost_based=off';
+SET explain_json_format_version = 1;
 
 -- disable_query_log
 -- disable_result_log
@@ -7427,6 +7428,7 @@ CREATE TABLE t2 ( pk INTEGER );
 INSERT INTO t2 VALUES (1), (2);
 ANALYZE TABLE t1, t2;
 --skip_if_hypergraph  # Depends on query plan.
+--replace_regex $elide_costs
 EXPLAIN FORMAT=tree SELECT * FROM t1 WHERE EXISTS ( SELECT alias1.f2 FROM t2 LEFT JOIN t1 ON 1 LEFT JOIN t1 AS alias1 ON 1 );
 --sorted_result
 SELECT * FROM t1 WHERE EXISTS ( SELECT alias1.f2 FROM t2 LEFT JOIN t1 ON 1 LEFT JOIN t1 AS alias1 ON 1 );

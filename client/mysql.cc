@@ -146,7 +146,7 @@ client_query_attributes *telemetry_client_attrs = nullptr;
 
 /** default set of patterns used for history exclusion filter */
 const static std::string HI_DEFAULTS(
-    "*IDENTIFIED*:*PASSWORD*:*https?*/p/?*/n/?*/b/?*/o/*");
+    "*IDENTIFIED*:*PASSWORD*:*https?*/p/?*/n/?*/b/?*/o/*:*ocid1.stream*");
 
 /** used for matching which history lines to ignore */
 static Pattern_matcher ignore_matcher;
@@ -1086,7 +1086,6 @@ static COMMANDS commands[] = {
     {"MBROVERLAPS", 0, nullptr, false, ""},
     {"MBRTOUCHES", 0, nullptr, false, ""},
     {"MBRWITHIN", 0, nullptr, false, ""},
-    {"MD5", 0, nullptr, false, ""},
     {"MID", 0, nullptr, false, ""},
     {"MIN", 0, nullptr, false, ""},
     {"MLINEFROMTEXT", 0, nullptr, false, ""},
@@ -1139,8 +1138,6 @@ static COMMANDS commands[] = {
     {"SUBDATE", 0, nullptr, false, ""},
     {"SIGN", 0, nullptr, false, ""},
     {"SIN", 0, nullptr, false, ""},
-    {"SHA", 0, nullptr, false, ""},
-    {"SHA1", 0, nullptr, false, ""},
     {"SLEEP", 0, nullptr, false, ""},
     {"SOUNDEX", 0, nullptr, false, ""},
     {"SPACE", 0, nullptr, false, ""},
@@ -3573,10 +3570,10 @@ static int com_help(String *buffer [[maybe_unused]],
 
   put_info(
       "\nFor information about MySQL products and services, visit:\n"
-      "   http://www.mysql.com/\n"
+      "   https://www.mysql.com/\n"
       "For developer information, including the MySQL Reference Manual, "
       "visit:\n"
-      "   http://dev.mysql.com/\n"
+      "   https://dev.mysql.com/\n"
       "To buy MySQL Enterprise support, training, or other products, visit:\n"
       "   https://shop.mysql.com/\n",
       INFO_INFO);

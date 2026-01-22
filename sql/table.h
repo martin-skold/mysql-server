@@ -680,6 +680,7 @@ typedef I_P_List<
     Wait_for_flush_list;
 
 typedef struct Table_share_foreign_key_info {
+  LEX_CSTRING fk_name;
   LEX_CSTRING referenced_table_db;
   LEX_CSTRING referenced_table_name;
   /**
@@ -689,15 +690,29 @@ typedef struct Table_share_foreign_key_info {
   LEX_CSTRING unique_constraint_name;
   dd::Foreign_key::enum_rule update_rule, delete_rule;
   uint columns;
+
   /**
-    Arrays with names of referencing columns of the FK.
+    Array with names of referencing columns of the FK.
   */
-  LEX_CSTRING *column_name;
+  LEX_CSTRING *referencing_column_names;
+
+  /**
+    Array with names of referenced columns of the FK.
+  */
+  LEX_CSTRING *referenced_column_names;
 } TABLE_SHARE_FOREIGN_KEY_INFO;
 
 typedef struct Table_share_foreign_key_parent_info {
+  /**
+    Since referenced_column_names and referencing_column_names are already
+    stored in TABLE_SHARE_FOREIGN_KEY_INFO, we avoid duplicating them here and
+    only add fk_name, allowing check_all_child_fk_ref() to use fk_name to
+    retrieve the column details from the child table share
+  */
+  LEX_CSTRING fk_name;
   LEX_CSTRING referencing_table_db;
   LEX_CSTRING referencing_table_name;
+
   dd::Foreign_key::enum_rule update_rule, delete_rule;
 } TABLE_SHARE_FOREIGN_KEY_PARENT_INFO;
 
@@ -945,6 +960,8 @@ struct TABLE_SHARE {
   bool db_low_byte_first{false}; /* Portable row format */
   bool crashed{false};
   bool is_view{false};
+  /// Materialized view, materialized directly by a storage engine
+  bool is_mv_se_materialized{false};
   bool m_open_in_progress{false}; /* True: alloc'ed, false: def opened */
   mysql::binlog::event::Table_id table_map_id; /* for row-based replication */
 
@@ -1683,6 +1700,10 @@ struct TABLE {
   Table_ref *pos_in_locked_tables{nullptr};
   ORDER *group{nullptr};
   const char *alias{nullptr};  ///< alias or table name
+
+  /* foreign key name for which handle is open */
+  const char *open_for_fk_name{nullptr};
+
   uchar *null_flags{nullptr};  ///< Pointer to the null flags of record[0]
   uchar *null_flags_saved{
       nullptr};  ///< Saved null_flags while null_row is true
@@ -3198,6 +3219,11 @@ class Table_ref {
   /// Return true if this represents a named view or a derived table
   bool is_view_or_derived() const { return derived != nullptr; }
 
+  /// Return true if this represents a non-materialized view or a derived table
+  bool is_non_materialized_view_or_derived() const {
+    return is_view_or_derived() && !is_mv_se_available();
+  }
+
   /// Return true if this represents a table function
   bool is_table_function() const { return table_function != nullptr; }
   /**
@@ -3805,6 +3831,19 @@ class Table_ref {
  private:
   LEX *view{nullptr}; /* link on VIEW lex for merging */
 
+  /// m_mv_se_materialized true indicates that the view is a materialized view
+  /// that is materialized by a storage engine directly.
+  bool m_mv_se_materialized{false};
+  /// m_mv_se_name is the name of the storage engine that might do the
+  /// materialization.
+  LEX_CSTRING m_mv_se_name{.str = nullptr, .length = 0};
+  /// m_mv_se_available indicates that the current Table_ref is using
+  /// the materialized view. A Table_ref can be a materialized view (as
+  /// indicated by m_mv_se_materialized), which is determined by its definition,
+  /// yet the materialization might not be used during the current lifetime of
+  /// this object, if the SE does not make it available for some reason.
+  bool m_mv_se_available{false};
+
  public:
   /// Array of selected expressions from a derived table or view.
   Field_translator *field_translation{nullptr};
@@ -3880,6 +3919,28 @@ class Table_ref {
     Prefer to use is_updatable() during preparation and optimization.
   */
   ulonglong updatable_view{0};  ///< VIEW can be updated
+
+  bool is_mv_se_available() const { return m_mv_se_available; }
+
+  void set_mv_se_available(bool mv_available) {
+    m_mv_se_available = mv_available;
+  }
+
+  bool is_mv_se_materialized() const { return m_mv_se_materialized; }
+
+  void set_mv_se_materialized(bool is_mv) { m_mv_se_materialized = is_mv; }
+
+  const LEX_CSTRING &get_mv_se_name() const { return m_mv_se_name; }
+
+  void set_mv_se_name(const char *engine_name) {
+    m_mv_se_name.str = engine_name;
+    m_mv_se_name.length = strlen(engine_name);
+  }
+
+  void set_mv_se_name(const LEX_CSTRING &engine_name) {
+    m_mv_se_name = engine_name;
+  }
+
   /**
       @brief The declared algorithm, if this is a view.
       @details One of
@@ -3956,6 +4017,12 @@ class Table_ref {
   mem_root_deque<Table_ref *> *join_list{nullptr};
   /// stop PS caching
   bool cacheable_table{false};
+  /**
+    Used to store foreign key name to identify correct table handle from
+    thd->open_tables during find_fk_table_from_open_tables() call
+  */
+  const char *open_for_fk_name{nullptr};
+
   /**
      Specifies which kind of table should be open for this element
      of table list.

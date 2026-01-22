@@ -295,11 +295,6 @@ extern Srv_cpu_usage srv_cpu_usage;
 
 extern Log_DDL *log_ddl;
 
-#ifdef INNODB_DD_TABLE
-extern bool srv_is_upgrade_mode;
-extern bool srv_downgrade_logs;
-#endif /* INNODB_DD_TABLE */
-
 extern bool srv_downgrade_partition_files;
 
 extern const char *srv_main_thread_op_info;
@@ -779,6 +774,7 @@ extern srv_stats_t srv_stats;
 #ifdef UNIV_PFS_THREAD
 extern mysql_pfs_key_t log_archiver_thread_key;
 extern mysql_pfs_key_t page_archiver_thread_key;
+extern mysql_pfs_key_t buf_pool_create_thread_key;
 extern mysql_pfs_key_t buf_dump_thread_key;
 extern mysql_pfs_key_t buf_resize_thread_key;
 extern mysql_pfs_key_t clone_ddl_thread_key;

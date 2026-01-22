@@ -1282,6 +1282,9 @@ class Query_block : public Query_term {
       tr->set_readonly();
   }
 
+  /// @returns number of tables in query block
+  size_t table_count() const { return m_table_list.elements; }
+
   /// @returns a map of all tables references in the query block
   table_map all_tables_map() const { return (1ULL << leaf_table_count) - 1; }
 
@@ -1380,7 +1383,7 @@ class Query_block : public Query_term {
    */
   ORDER *find_in_group_list(Item *item, int *rollup_level) const;
   int group_list_size() const;
-
+  void set_olap_type(olap_type in_olap) { olap = in_olap; }
   /// @returns true if query block contains windows
   bool has_windows() const { return m_windows.elements > 0; }
 
@@ -2171,6 +2174,9 @@ class Query_block : public Query_term {
   /// replaced by a field during scalar_to_derived transformation
   uint n_scalar_subqueries{0};
 
+  /// Number of stored function calls in this query block
+  uint n_stored_func_calls{0};
+
   /// Number of materialized derived tables and views in this query block.
   uint materialized_derived_table_count{0};
   /// Number of partitioned tables
@@ -2484,18 +2490,10 @@ class Query_block : public Query_term {
   Table_ref *resolve_nest{
       nullptr};  ///< Used when resolving outer join condition
 
-  /**
-    Initializes the grouping set if the query block includes GROUP BY
-    modifiers.
-  */
-  bool allocate_grouping_sets(THD *thd);
-
-  /**
-    Populates the grouping sets if the query block includes non-primitive
-    grouping.
-  */
-  bool populate_grouping_sets(THD *thd);
   int get_number_of_grouping_sets() const { return m_num_grouping_sets; }
+  void set_number_of_grouping_sets(int num_grouping_sets) {
+    m_num_grouping_sets = num_grouping_sets;
+  }
 
  private:
   /**
@@ -3729,6 +3727,8 @@ class Lex_input_stream {
 
   void reduce_digest_token(uint token_left, uint token_right);
 
+  void adjust_digest_by_numeric_column_token(ulonglong value);
+
   /**
     True if this scanner tokenizes a partial query (partition expression,
     generated column expression etc.)
@@ -3931,7 +3931,8 @@ enum execute_only_in_secondary_reasons {
   TABLESAMPLE,
   OUTFILE_OBJECT_STORE,
   TEMPORARY_TABLE_CREATION,
-  TEMPORARY_TABLE_USAGE
+  TEMPORARY_TABLE_USAGE,
+  GROUPING_SETS
 };
 
 /*
@@ -4233,6 +4234,8 @@ struct LEX : public Query_tables_list {
         return "Secondary engine temporary table creation";
       case TEMPORARY_TABLE_USAGE:
         return "Secondary engine temporary table within this statement";
+      case GROUPING_SETS:
+        return " GROUPING_SETS";
       default:
         return "UNDEFINED";
     }
@@ -4374,6 +4377,10 @@ struct LEX : public Query_tables_list {
   uint8 create_view_algorithm;
   uint8 create_view_check;
   enum_view_type create_view_type;
+  /// This flag indicates that the CREATE VIEW statement contains the
+  /// MATERIALIZED keyword.
+  bool create_view_materialization;
+
   /**
     @todo ensure that correct CONTEXT_ANALYSIS_ONLY is set for all preparation
           code, so we can fully rely on this field.

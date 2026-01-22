@@ -34,7 +34,6 @@
 #include "harness_assert.h"
 #include "mysqld_error.h"
 #include "random_generator.h"
-#include "sha1.h"  // compute_sha1_hash() from mysql's include/
 
 static const int kMetadataServerPasswordLength = 16;
 
@@ -109,18 +108,6 @@ void throw_account_exists(MySQLSession *session, const MySQLSession::Error &e,
 
 unsigned get_password_retries(const UserOptions &user_options) {
   return user_options.password_retries;
-}
-
-std::string make_account_list(MySQLSession *session, const std::string username,
-                              const std::set<std::string> &hostnames) {
-  std::string account_list;
-  for (const std::string &h : hostnames) {
-    if (!account_list.empty()) {
-      account_list += ",";
-    }
-    account_list += session->quote(username) + "@" + session->quote(h);
-  }
-  return account_list;
 }
 
 }  // namespace
@@ -370,8 +357,9 @@ void BootstrapMySQLAccount::create_accounts(
   // NEW accounts would be better (and we do that later), but in the meantime if
   // determining new accounts fails, at least we'll have a list of all accounts
   // that went into CREATE USER [IF NOT EXISTS] statement
-  undo_create_account_list_ = {UndoCreateAccountList::kAllAccounts,
-                               make_account_list(mysql_, username, hostnames)};
+  accounts_cleaner_.register_tmp_undo_account_list(
+      {mysqlrouter::MySQLAccountsCleaner::UndoCreateAccountList::kAllAccounts,
+       accounts_cleaner_.make_account_list(username, hostnames)});
 
   // determine which of the accounts we ran in CREATE USER... statement did not
   // exist before
@@ -380,13 +368,14 @@ void BootstrapMySQLAccount::create_accounts(
   const std::string new_accounts =
       new_hostnames.empty()
           ? ""
-          : make_account_list(mysql_, username, new_hostnames);
+          : accounts_cleaner_.make_account_list(username, new_hostnames);
 
   // if we made it here, we managed to get a list of JUST NEW accounts that got
   // created.  This is more useful than the previous list of ALL accounts, so
   // let's replace it with this new better list.
-  undo_create_account_list_ = {UndoCreateAccountList::kNewAccounts,
-                               new_accounts};
+  accounts_cleaner_.register_undo_account_list(
+      {mysqlrouter::MySQLAccountsCleaner::UndoCreateAccountList::kNewAccounts,
+       new_accounts});
 
   // proceed to giving grants
   give_grants_to_users(user_options, new_accounts);

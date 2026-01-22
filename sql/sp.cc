@@ -1733,7 +1733,7 @@ bool sp_show_create_routine(THD *thd, enum_sp_type type, sp_name *name) {
     NULL    in case of error.
 */
 
-sp_head *sp_find_routine(THD *thd, enum_sp_type type, sp_name *name,
+sp_head *sp_find_routine(THD *thd, enum_sp_type type, const sp_name *name,
                          sp_cache **cp, bool cache_only) {
   DBUG_TRACE;
   DBUG_PRINT("enter", ("name:  %.*s.%.*s  type: %d  cache only %d",
@@ -2543,7 +2543,10 @@ static std::string binary_to_hex(std::string_view input) {
   std::stringstream ss;
   ss << std::hex << std::uppercase << std::setfill('0');
   for (char i : input) {
-    ss << std::setw(2) << static_cast<unsigned>(i);
+    // First convert it to unsigned to remove the signage but keep it 8 bit.
+    // Then convert it to int to be treated as a number, not a character.
+    ss << std::setw(2)
+       << static_cast<unsigned int>(static_cast<unsigned char>(i));
   }
   return ss.str();
 }

@@ -36,15 +36,17 @@ this program; if not, write to the Free Software Foundation, Inc.,
 #ifndef btr0mtib_h
 #define btr0mtib_h
 
-#include <stddef.h>
+#include <cstddef>
 #include <vector>
 
+#include "api0api.h"
 #include "btr0load.h"
 #include "ddl0impl-compare.h"
 #include "dict0dict.h"
 #include "lob0bulk.h"
 #include "lob0lob.h"
 #include "page0cur.h"
+#include "row0mysql.h"
 #include "ut0class_life_cycle.h"
 #include "ut0new.h"
 #include "ut0object_cache.h"
@@ -853,6 +855,10 @@ class Blob_inserter {
   @return the current transaction id. */
   trx_id_t get_trx_id() const;
 
+  bool verify_blob_context(Blob_context ctx) const {
+    return ctx == m_blob_handle.get();
+  }
+
  private:
   Page_load *alloc_page_from_extent(Page_extent *&m_page_extent);
 
@@ -896,6 +902,10 @@ class Btree_load : private ut::Non_copyable {
  public:
   /** Merge multiple Btree_load sub-trees together. */
   class Merger;
+
+  /** Class used to read the target table when the table is not empty. We bulk
+  load into a duplicate and migrate the data into it. */
+  class Table_reader;
 
   dberr_t insert_blob(lob::ref_t &ref, const dfield_t *dfield) {
     return m_full_blob_inserter.insert_blob(ref, dfield);
@@ -1188,6 +1198,9 @@ class Btree_load : private ut::Non_copyable {
                       irrespective of whether it is fully used or not. */
   void add_to_bulk_flusher(bool finish = false);
 
+  /** Add blob extents to the bulk flusher and wait till they are flushed. */
+  void add_blobs_to_bulk_flusher();
+
   /** Add the given page extent object to the bulk flusher.
   @param[in]  page_extent the extent to be flushed. */
   void add_to_bulk_flusher(Page_extent *page_extent);
@@ -1210,6 +1223,10 @@ class Btree_load : private ut::Non_copyable {
   void disable_check_order() { m_check_order = false; }
 
   Bulk_extent_allocator &get_extent_allocator() { return m_allocator; }
+
+  bool verify_blob_context(Blob_context ctx) const {
+    return m_blob_inserter.verify_blob_context(ctx);
+  }
 
  private:
   /** Page allocation type. We allocate in extents by default. */

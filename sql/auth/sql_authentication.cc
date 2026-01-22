@@ -1236,7 +1236,11 @@ Cached_authentication_plugins::Cached_authentication_plugins() {
     if (cached_plugins_names[i].str[0]) {
       cached_plugins[i] = my_plugin_lock_by_name(
           nullptr, cached_plugins_names[i], MYSQL_AUTHENTICATION_PLUGIN);
+      /* It's OK to not find mysql_native */
       if (!cached_plugins[i]) m_valid = false;
+      if (cached_plugins[i] &&
+          plugin_load_option(cached_plugins[i]) != PLUGIN_OFF)
+        enabled_plugins.push_back((cached_plugins_enum)i);
     } else
       cached_plugins[i] = nullptr;
   }
@@ -1583,7 +1587,8 @@ void optimize_plugin_compare_by_pointer(LEX_CSTRING *plugin_name) {
 }
 
 bool auth_plugin_is_built_in(const char *plugin_name) {
-  LEX_CSTRING plugin = {STRING_WITH_LEN(plugin_name)};
+  assert(plugin_name != nullptr);
+  LEX_CSTRING plugin = {plugin_name, strlen(plugin_name)};
   return g_cached_authentication_plugins->auth_plugin_is_built_in(&plugin);
 }
 
@@ -2245,7 +2250,11 @@ ACL_USER *decoy_user(const LEX_CSTRING &username, const LEX_CSTRING &hostname,
     } else {
       const int DECIMAL_SHIFT = 1000;
       const int random_number = static_cast<int>(my_rnd(rand) * DECIMAL_SHIFT);
-      uint plugin_num = (uint)(random_number % ((uint)PLUGIN_LAST));
+      uint plugin_inx =
+          (uint)(random_number %
+                 g_cached_authentication_plugins->enabled_plugins.size());
+      uint plugin_num =
+          (uint)g_cached_authentication_plugins->enabled_plugins[plugin_inx];
       user->plugin =
           Cached_authentication_plugins::cached_plugins_names[plugin_num];
       unknown_accounts->clear_if_greater(MAX_UNKNOWN_ACCOUNTS);
@@ -3766,8 +3775,7 @@ static void server_mpvio_initialize(THD *thd, MPVIO_EXT *mpvio,
 
 static void server_mpvio_update_thd(THD *thd, MPVIO_EXT *mpvio) {
   thd->max_client_packet_length = mpvio->max_client_packet_length;
-  if (mpvio->protocol->has_client_capability(CLIENT_INTERACTIVE))
-    thd->variables.net_wait_timeout = thd->variables.net_interactive_timeout;
+  thd->set_protocol_dependent_variables(mpvio->protocol);
   thd->security_context()->assign_user(
       mpvio->auth_info.user_name,
       (mpvio->auth_info.user_name ? strlen(mpvio->auth_info.user_name) : 0));
@@ -3778,8 +3786,6 @@ static void server_mpvio_update_thd(THD *thd, MPVIO_EXT *mpvio) {
   const LEX_CSTRING sctx_user = thd->security_context()->user();
   mpvio->auth_info.user_name = const_cast<char *>(sctx_user.str);
   mpvio->auth_info.user_name_length = sctx_user.length;
-  if (thd->get_protocol()->has_client_capability(CLIENT_IGNORE_SPACE))
-    thd->variables.sql_mode |= MODE_IGNORE_SPACE;
 }
 
 /**
@@ -3967,7 +3973,7 @@ static void check_and_update_password_lock_state(MPVIO_EXT &mpvio, THD *thd,
              mpvio.acl_user->user ? mpvio.acl_user->user : "",
              mpvio.auth_info.host_or_ip ? mpvio.auth_info.host_or_ip : "",
              str_blocked_for_days, str_days_remaining, failed_logins);
-      res = CR_ERROR;
+      res = CR_AUTH_TEMPORARY_ACCOUNT_LOCKED_ERROR;
     } else
       acl_cache_lock.unlock();
   }
@@ -4174,6 +4180,12 @@ int acl_authenticate(THD *thd, enum_server_command command) {
         case CR_AUTH_USER_CREDENTIALS:
           errors.m_authentication = 1;
           break;
+        case CR_AUTH_ACCOUNT_LOCKED_ERROR:
+          errors.m_account_locked = 1;
+          break;
+        case CR_AUTH_TEMPORARY_ACCOUNT_LOCKED_ERROR:
+          errors.m_temporary_account_locked = 1;
+          break;
         case CR_ERROR:
         default:
           /* Unknown of unspecified auth plugin error. */
@@ -4267,6 +4279,9 @@ int acl_authenticate(THD *thd, enum_server_command command) {
         if (opt_always_activate_granted_roles) {
           activate_all_granted_and_mandatory_roles(acl_user, sctx);
         } else {
+          if (opt_activate_mandatory_roles) {
+            activate_all_mandatory_roles(sctx);
+          }
           /* The server policy is to only activate default roles */
           get_default_roles(authid, default_roles);
           List_of_auth_id_refs::iterator it = default_roles.begin();
@@ -4311,6 +4326,9 @@ int acl_authenticate(THD *thd, enum_server_command command) {
         Check whether the account has been locked.
       */
       if (unlikely(mpvio.acl_user->account_locked)) {
+        Host_errors errors;
+        errors.m_account_locked = 1;
+        inc_host_errors(mpvio.ip, &errors);
         locked_account_connection_count++;
 
         my_error(ER_ACCOUNT_HAS_BEEN_LOCKED, MYF(0), mpvio.acl_user->user,
@@ -4442,13 +4460,6 @@ int acl_authenticate(THD *thd, enum_server_command command) {
       thd->get_stmt_da()->disable_status();
     else
       my_ok(thd);
-#ifdef HAVE_PSI_THREAD_INTERFACE
-    LEX_CSTRING main_sctx_user = thd->m_main_security_ctx.user();
-    LEX_CSTRING main_sctx_host_or_ip = thd->m_main_security_ctx.host_or_ip();
-    PSI_THREAD_CALL(set_thread_account)
-    (main_sctx_user.str, main_sctx_user.length, main_sctx_host_or_ip.str,
-     main_sctx_host_or_ip.length);
-#endif /* HAVE_PSI_THREAD_INTERFACE */
 
     /*
       Turn ON the flag in THD iff the user is granted SYSTEM_USER privilege.
@@ -4462,7 +4473,16 @@ int acl_authenticate(THD *thd, enum_server_command command) {
   ret = 0;
 end:
   if (mpvio.restrictions) mpvio.restrictions->~Restrictions();
-  /* Ready to handle queries */
+    /* Ready to handle queries */
+#ifdef HAVE_PSI_THREAD_INTERFACE
+  LEX_CSTRING main_sctx_user = thd->m_main_security_ctx.user();
+  LEX_CSTRING main_sctx_host_or_ip = thd->m_main_security_ctx.host_or_ip();
+  PSI_THREAD_CALL(set_thread_account)
+  (main_sctx_user.str, main_sctx_user.length, main_sctx_host_or_ip.str,
+   main_sctx_host_or_ip.length);
+  PSI_THREAD_CALL(set_thread_command)(thd->get_command());
+  PSI_THREAD_CALL(set_thread_start_time)(thd->query_start_in_secs());
+#endif /* HAVE_PSI_THREAD_INTERFACE */
   return ret;
 }
 

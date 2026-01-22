@@ -109,13 +109,6 @@ Srv_threads srv_threads;
 Srv_cpu_usage srv_cpu_usage;
 #endif /* UNIV_HOTBACKUP */
 
-#ifdef INNODB_DD_TABLE
-/* true when upgrading. */
-/* TODO To be removed in WL#16210 */
-bool srv_is_upgrade_mode = false;
-bool srv_downgrade_logs = false;
-#endif /* INNODB_DD_TABLE */
-
 /* Revert to old partition file name if upgrade fails. */
 bool srv_downgrade_partition_files = false;
 
@@ -1736,7 +1729,7 @@ void srv_export_innodb_status(void) {
   below the low limit. */
   ReadView oldest_view;
   trx_sys->mvcc->clone_oldest_view(&oldest_view);
-  trx_id_t low_limit_no = oldest_view.view_low_limit_no();
+  trx_id_t low_limit_no = oldest_view.low_limit_no();
 
   rw_lock_s_unlock(&purge_sys->latch);
 

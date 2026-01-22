@@ -226,6 +226,7 @@ DROP TABLE t1;
 
 CREATE TABLE t(a INT);
 INSERT INTO t values (1),(2),(3),(6),(0);
+SET explain_json_format_version = 1;
 
 #Costs vary in some of the platforms. So not printing these values.
 --echo Discard w
@@ -294,6 +295,7 @@ eval $query;
 --skip_if_hypergraph  # Depends on the query plan.
 eval EXPLAIN FORMAT=JSON $query;
 
+SET explain_json_format_version = DEFAULT;
 DROP TABLE t;
 
 --echo # End of test for Bug#27062031
@@ -432,7 +434,6 @@ DROP TABLE t;
 --echo #               HYBRID_TYPE == DECIMAL_RESULT
 --echo #
 
-DO ST_CROSSES(@g,SUM(SHA(@g))OVER());
 DO UNHEX(SUM(@g)OVER());
 DO BIT_LENGTH(AVG(@f)OVER());
 DO COMPRESS(SUM(' >')OVER());

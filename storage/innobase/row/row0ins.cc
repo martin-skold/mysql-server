@@ -31,6 +31,7 @@ this program; if not, write to the Free Software Foundation, Inc.,
  Created 4/20/1996 Heikki Tuuri
  *******************************************************/
 
+#include <sql/sql_thd_internal_api.h>
 #include <sys/types.h>
 
 #include "btr0btr.h"
@@ -253,6 +254,7 @@ void ins_node_set_new_row(
 
   update = row_upd_build_sec_rec_difference_binary(rec, cursor->index, *offsets,
                                                    entry, heap);
+  ut_d(update->validate_for_index(cursor->index));
 
   if (!rec_get_deleted_flag(rec, rec_offs_comp(*offsets))) {
     /* We should never insert in place of a record that
@@ -300,7 +302,7 @@ void ins_node_set_new_row(
     ut_ad(!dummy_big_rec);
   }
 
-  return (err);
+  return err;
 }
 
 /** Does an insert operation by delete unmarking and updating a delete marked
@@ -347,10 +349,12 @@ void ins_node_set_new_row(
                                            true, thr_get_trx(thr), heap,
                                            mysql_table, &err);
   if (err != DB_SUCCESS) {
-    return (err);
+    return err;
   }
   if (mode != BTR_MODIFY_TREE) {
     ut_ad((mode & ~BTR_ALREADY_S_LATCHED) == BTR_MODIFY_LEAF);
+    ut_ad(update);
+    ut_d(update->validate_for_index(cursor->index));
 
     /* Try optimistic updating of the record, keeping changes
     within the page */
@@ -367,7 +371,7 @@ void ins_node_set_new_row(
     }
   } else {
     if (buf_LRU_buf_pool_running_out()) {
-      return (DB_LOCK_TABLE_FULL);
+      return DB_LOCK_TABLE_FULL;
     }
 
     big_rec_t *big_rec = nullptr;
@@ -391,7 +395,7 @@ void ins_node_set_new_row(
     }
   }
 
-  return (err);
+  return err;
 }
 
 /** Returns true if in a cascaded update/delete an ancestor node of node
@@ -2922,6 +2926,10 @@ dberr_t row_ins_sec_index_entry_low(uint32_t flags, ulint mode,
 
       mtr_start(&mtr);
 
+      if (index->table->is_temporary()) {
+        mtr.set_log_mode(MTR_LOG_NO_REDO);
+      }
+
       search_mode &= ~BTR_MODIFY_LEAF;
 
       search_mode |= BTR_MODIFY_TREE;
@@ -3121,7 +3129,8 @@ and return. don't execute actual insert. */
 
   DBUG_TRACE;
 
-  if (!index->table->foreign_set.empty()) {
+  if (!thd_is_sql_fk_checks_enabled() && !index->table->foreign_set.empty()) {
+    DBUG_PRINT("fk", ("InnoDB FK on table %s", index->table->name.m_name));
     err = row_ins_check_foreign_constraints(index->table, index, entry, thr);
     if (err != DB_SUCCESS) {
       return err;
@@ -3221,7 +3230,9 @@ and return. don't execute actual insert. */
     }
   });
 
-  if (!index->table->foreign_set.empty()) {
+  if (!thd_is_sql_fk_checks_enabled() && !index->table->foreign_set.empty()) {
+    DBUG_PRINT("fk", ("InnoDB FK on table %s", index->table->name.m_name));
+
     err = row_ins_check_foreign_constraints(index->table, index, entry, thr);
     if (err != DB_SUCCESS) {
       return (err);

@@ -542,6 +542,7 @@ enum enum_commands {
   Q_OUTPUT, /* redirect output to a file */
   Q_RESET_CONNECTION,
   Q_QUERY_ATTRIBUTES,
+  Q_SELECT_DB,
   Q_UNKNOWN, /* Unknown command.   */
   Q_COMMENT, /* Comments, ignored. */
   Q_COMMENT_WITH_COMMAND,
@@ -576,7 +577,7 @@ const char *command_names[] = {
     "list_files", "list_files_write_file", "list_files_append_file",
     "send_shutdown", "shutdown_server", "result_format", "move_file",
     "remove_files_wildcard", "copy_files_wildcard", "send_eval", "output",
-    "reset_connection", "query_attributes",
+    "reset_connection", "query_attributes", "select_db",
 
     nullptr};
 
@@ -616,6 +617,8 @@ void replace_strings_append(REPLACE *rep, DYNAMIC_STRING *ds, const char *from,
 [[noreturn]] void die(const char *fmt, ...)
     MY_ATTRIBUTE((format(printf, 1, 2)));
 [[noreturn]] void abort_not_supported_test(const char *fmt, ...)
+    MY_ATTRIBUTE((format(printf, 1, 2)));
+[[noreturn]] void abort_partially_supported_test(const char *fmt, ...)
     MY_ATTRIBUTE((format(printf, 1, 2)));
 void verbose_msg(const char *fmt, ...) MY_ATTRIBUTE((format(printf, 1, 2)));
 void log_msg(const char *fmt, ...) MY_ATTRIBUTE((format(printf, 1, 2)));
@@ -1289,8 +1292,9 @@ void handle_error_and_die(const char *subject, const char *interpolated_query,
     message << "\nExpected error(s): " << expected_errors;
   }
   if (actual_errno != 0) {
-    message << "\nReturned error: " << actual_errno << " (" << actual_sqlstate
-            << "): " << actual_message;
+    message << "\nReturned error: " << get_errname_from_code(actual_errno)
+            << "(" << actual_errno << ") "
+            << "(" << actual_sqlstate << "): " << actual_message;
   }
   die("%s", message.str().c_str());
 }
@@ -1577,7 +1581,14 @@ static void cleanup_and_exit(int exit_code) {
   free_used_memory();
   my_end(my_end_arg);
 
-  enum test_exit_code { PASS, FAIL, SKIPPED = 62, NOSKIP_PASS, NOSKIP_FAIL };
+  enum test_exit_code {
+    PASS,
+    FAIL,
+    SKIPPED = 62,
+    NOSKIP_PASS,
+    NOSKIP_FAIL,
+    OPT_PASS = 66
+  };
   if (skip_ignored) {
     exit_code = (exit_code == PASS) ? NOSKIP_PASS : NOSKIP_FAIL;
   }
@@ -1598,6 +1609,9 @@ static void cleanup_and_exit(int exit_code) {
         break;
       case NOSKIP_FAIL:
         printf("noskip-failed\n");
+        break;
+      case OPT_PASS:
+        printf("opt-passed\n");
         break;
       default:
         printf("unknown exit code: %d\n", exit_code);
@@ -1711,6 +1725,29 @@ void abort_not_supported_test(const char *fmt, ...) {
   va_end(args);
 
   cleanup_and_exit(62);
+}
+
+void abort_partially_supported_test(const char *fmt, ...) {
+  va_list args;
+  DBUG_TRACE;
+
+  /* Print include filestack */
+  fprintf(stderr, "The test '%s' is not supported by this installation\n",
+          file_stack->file_name);
+  fprintf(stderr, "Detected in ");
+  print_file_stack();
+
+  /* Print error message */
+  va_start(args, fmt);
+  if (fmt) {
+    fprintf(stderr, "reason: ");
+    vfprintf(stderr, fmt, args);
+    fprintf(stderr, "\n");
+    fflush(stderr);
+  }
+  va_end(args);
+
+  cleanup_and_exit(66);
 }
 
 void verbose_msg(const char *fmt, ...) {
@@ -2275,7 +2312,7 @@ static void check_result() {
       const bool ignored_diff =
           show_diff(nullptr, result_file_name, reject_file);
       if (ignored_diff) {
-        abort_not_supported_test(
+        abort_partially_supported_test(
             "Hypergraph optimizer did not support all queries.");
       }
       die("%s", mess);
@@ -2988,13 +3025,16 @@ static void var_set_escape(struct st_command *command, VAR *dst) {
   var_set_query_get_value()
 
   DESCRIPTION
-  let $variable= query_get_value(<query to run>,<column name>,<row no>);
+  let $variable= query_get_value(<query to run>,<column name>,<row no>,
+  <resultset no>);
 
   <query to run> -    The query that should be sent to the server
   <column name> -     Name of the column that holds the field be compared
                       against the expected value
   <row no> -          Number of the row that holds the field to be
                       compared against the expected value
+  <resultset no> -    Optional, number of the result set which holds the
+                      required field.
 
 */
 
@@ -3007,10 +3047,13 @@ static void var_set_query_get_value(struct st_command *command, VAR *var) {
   static DYNAMIC_STRING ds_query;
   static DYNAMIC_STRING ds_col;
   static DYNAMIC_STRING ds_row;
+  static DYNAMIC_STRING ds_rset;
+
   const struct command_arg query_get_value_args[] = {
       {"query", ARG_STRING, true, &ds_query, "Query to run"},
       {"column name", ARG_STRING, true, &ds_col, "Name of column"},
-      {"row number", ARG_STRING, true, &ds_row, "Number for row"}};
+      {"row number", ARG_STRING, true, &ds_row, "Number for row"},
+      {"resultset number", ARG_STRING, false, &ds_rset, "Resultset number"}};
 
   DBUG_TRACE;
 
@@ -3022,12 +3065,32 @@ static void var_set_query_get_value(struct st_command *command, VAR *var) {
 
   DBUG_PRINT("info", ("query: %s", ds_query.str));
   DBUG_PRINT("info", ("col: %s", ds_col.str));
+  DBUG_PRINT("info", ("row: %s", ds_row.str));
+  DBUG_PRINT("info", ("result_set: %s", ds_rset.str));
 
   /* Convert row number to int */
   if (!str2int(ds_row.str, 10, (long)0, (long)INT_MAX, &row_no))
     die("Invalid row number: '%s'", ds_row.str);
   DBUG_PRINT("info", ("row: %s, row_no: %ld", ds_row.str, row_no));
   dynstr_free(&ds_row);
+
+  /* Check if resultset number is passed, and if it is an integer */
+  int reqd_rset = 0;
+  if (ds_rset.length) {
+    reqd_rset = get_int_val(ds_rset.str);
+    if (reqd_rset < 0) {
+      /* In case of invalid result set number, copy the value passed to
+         print later
+      */
+      char buf[32];
+      strmake(buf, ds_rset.str, sizeof(buf) - 1);
+      dynstr_free(&ds_rset);
+      die("Invalid value '%s' for result set number argument given to "
+          "'query_get_value' command.",
+          buf);
+    }
+  }
+  dynstr_free(&ds_rset);
 
   /* Remove any surrounding "'s from the query - if there is any */
   if (strip_surrounding(ds_query.str, '"', '"'))
@@ -3045,8 +3108,32 @@ static void var_set_query_get_value(struct st_command *command, VAR *var) {
     return;
   }
 
-  if (!(res = mysql_store_result_wrapper(mysql)))
-    die("Query '%s' didn't return a result set", ds_query.str);
+  if (reqd_rset > 1) {
+    int next_res = 0, cur_rset = 1;
+    do {
+      if (cur_rset == reqd_rset) break;
+      if ((res = mysql_store_result_wrapper(mysql)) != nullptr) {
+        DBUG_PRINT(
+            "info",
+            ("Ignoring result-set number %d for query '%s' with %d fields",
+             cur_rset, ds_query.str, mysql_num_fields(res)));
+        mysql_free_result_wrapper(res);
+      } else {
+        DBUG_PRINT("info", ("No result-set number %d returned for query '%s'",
+                            cur_rset, ds_query.str));
+      }
+      cur_rset++;
+      next_res = mysql_next_result_wrapper(mysql);
+    } while (!next_res);
+  }
+
+  if (!(res = mysql_store_result_wrapper(mysql))) {
+    if (reqd_rset > 1)
+      die("Query '%s' didn't return result set number '%d'", ds_query.str,
+          reqd_rset);
+    else
+      die("Query '%s' didn't return a result set", ds_query.str);
+  }
 
   {
     /* Find column number from the given column name */
@@ -3091,8 +3178,26 @@ static void var_set_query_get_value(struct st_command *command, VAR *var) {
     }
     eval_expr(var, value, nullptr, false, false);
   }
-  dynstr_free(&ds_query);
   mysql_free_result_wrapper(res);
+
+  DBUG_PRINT("info", ("End of result extraction for query_get_value('%s')",
+                      ds_query.str));
+  /* Using a procedure with multiple result sets returned can cause commands
+     to go out of sync. We read all result sets sent, ignore and free them to
+     allow further queries to execute.
+  */
+  int next_res = 0;
+  while (!(next_res = mysql_next_result_wrapper(mysql))) {
+    if ((res = mysql_store_result_wrapper(mysql)) != nullptr) {
+      DBUG_PRINT("info", ("Ignoring result with %d fields for query '%s'",
+                          mysql_num_fields(res), ds_query.str));
+      mysql_free_result_wrapper(res);
+    }
+  }
+  // Call was successful and there are no more results.
+  assert(next_res == -1);
+
+  dynstr_free(&ds_query);
 }
 
 static void var_copy(VAR *dest, VAR *src) {
@@ -4869,6 +4974,39 @@ static void do_change_user(struct st_command *command) {
 
 /*
   SYNOPSIS
+  do_select_db
+  command       called command
+
+  DESCRIPTION
+  select_db [<db>]
+  <db> - default database
+
+  Changes the database for the current connection by using the MySQL client
+  command mysql_select_db.
+
+*/
+
+static void do_select_db(struct st_command *command) {
+  MYSQL *mysql = &cur_con->mysql;
+  static DYNAMIC_STRING ds_db;
+  const struct command_arg select_db_args[] = {
+      {"database", ARG_STRING, false, &ds_db, "Database to select"},
+  };
+  check_command_args(command, command->first_argument, select_db_args,
+                     sizeof(select_db_args) / sizeof(struct command_arg), ',');
+
+  if (mysql_select_db(mysql, ds_db.str)) {
+    handle_error(curr_command, mysql_errno(mysql), mysql_error(mysql),
+                 mysql_sqlstate(mysql), &ds_res);
+    mysql->reconnect = true;
+    mysql_reconnect(&cur_con->mysql);
+  }
+
+  dynstr_free(&ds_db);
+}
+
+/*
+  SYNOPSIS
   do_perl
   command	command handle
 
@@ -6536,12 +6674,13 @@ static void safe_connect(MYSQL *mysql, const char *name, const char *host,
 /// @param db      Database name
 /// @param port    Port number
 /// @param sock    Socket value
+/// @param is_interactive  Pass CLIENT_INTERACTIVE to mysql_real_connect()
 ///
 /// @retval 1 if connection succeeds, 0 otherwise
 static int connect_n_handle_errors(struct st_command *command, MYSQL *con,
                                    const char *host, const char *user,
                                    const char *pass, const char *db, int port,
-                                   const char *sock) {
+                                   const char *sock, bool is_interactive) {
   DYNAMIC_STRING *ds;
   int failed_attempts = 0;
 
@@ -6578,9 +6717,9 @@ static int connect_n_handle_errors(struct st_command *command, MYSQL *con,
   mysql_options4(con, MYSQL_OPT_CONNECT_ATTR_ADD, "program_name", "mysqltest");
   mysql_options(con, MYSQL_OPT_CAN_HANDLE_EXPIRED_PASSWORDS,
                 &can_handle_expired_passwords);
-  while (!mysql_real_connect_wrapper(con, host, user, pass, db, port,
-                                     sock ? sock : nullptr,
-                                     CLIENT_MULTI_STATEMENTS)) {
+  while (!mysql_real_connect_wrapper(
+      con, host, user, pass, db, port, sock ? sock : nullptr,
+      CLIENT_MULTI_STATEMENTS | (is_interactive ? CLIENT_INTERACTIVE : 0))) {
     /*
       If we have used up all our connections check whether this
       is expected (by --error). If so, handle the error right away.
@@ -6685,6 +6824,7 @@ static void do_connect(struct st_command *command) {
   const uint save_opt_ssl_mode = opt_ssl_mode;
   bool con_socket = false, con_tcp = false;
   unsigned int factor = 0;
+  bool is_interactive = false;
 
   static DYNAMIC_STRING ds_connection_name;
   static DYNAMIC_STRING ds_host;
@@ -6806,9 +6946,8 @@ static void do_connect(struct st_command *command) {
     while (*end && !my_isspace(charset_info, *end)) end++;
 
     const size_t con_option_len = end - con_options;
-    char cur_con_option[10] = {};
-    strmake(cur_con_option, con_options, con_option_len);
-
+    std::string cur_option_str{con_options, con_option_len};
+    const char *cur_con_option = cur_option_str.c_str();
     if (!std::strcmp(cur_con_option, "SSL"))
       con_ssl = true;
     else if (!std::strcmp(cur_con_option, "COMPRESS"))
@@ -6823,6 +6962,8 @@ static void do_connect(struct st_command *command) {
       con_socket = true;
     else if (!std::strcmp(cur_con_option, "TCP"))
       con_tcp = true;
+    else if (!std::strcmp(cur_con_option, "INTERACTIVE"))
+      is_interactive = true;
     else
       die("Illegal option to connect: %s", cur_con_option);
 
@@ -6963,7 +7104,7 @@ static void do_connect(struct st_command *command) {
 
   if (connect_n_handle_errors(command, &con_slot->mysql, ds_host.str,
                               ds_user.str, ds_password1.str, ds_database.str,
-                              con_port, ds_sock.str)) {
+                              con_port, ds_sock.str, is_interactive)) {
     DBUG_PRINT("info", ("Inserting connection %s in connection pool",
                         ds_connection_name.str));
     my_free(con_slot->name);
@@ -10420,6 +10561,11 @@ int main(int argc, char **argv) {
           break;
         }
 
+        case Q_SELECT_DB: {
+          do_select_db(command);
+          break;
+        }
+
         default:
           processed = 0;
           break;
@@ -11619,26 +11765,6 @@ void replace_dynstr_append_uint(DYNAMIC_STRING *ds, uint val) {
   replace_dynstr_append_mem(ds, buff, end - buff);
 }
 
-/*
-  Build a list of pointer to each line in ds_input, sort
-  the list and use the sorted list to append the strings
-  sorted to the output ds
-
-  SYNOPSIS
-  dynstr_append_sorted
-  ds - string where the sorted output will be appended
-  ds_input - string to be sorted
-  start_sort_column - column to start sorting from (0 for sorting
-    the entire line); a stable sort will be used
-*/
-
-class Comp_lines {
- public:
-  bool operator()(const char *a, const char *b) {
-    return std::strcmp(a, b) < 0;
-  }
-};
-
 static size_t length_of_n_first_columns(const std::string &str,
                                         int start_sort_column) {
   std::stringstream columns(str);
@@ -11654,6 +11780,18 @@ static size_t length_of_n_first_columns(const std::string &str,
   return size_of_columns;
 }
 
+/*
+  Build a list of pointer to each line in ds_input, sort
+  the list and use the sorted list to append the strings
+  sorted to the output ds
+
+  SYNOPSIS
+  dynstr_append_sorted
+  ds - string where the sorted output will be appended
+  ds_input - string to be sorted
+  start_sort_column - column to start sorting from (0 for sorting
+    the entire line); a stable sort will be used
+*/
 void dynstr_append_sorted(DYNAMIC_STRING *ds, DYNAMIC_STRING *ds_input,
                           int start_sort_column) {
   char *start = ds_input->str;

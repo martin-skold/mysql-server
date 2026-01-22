@@ -58,6 +58,7 @@ namespace dd {
 class Foreign_key;
 class Schema;
 class Table;
+class View;
 }  // namespace dd
 
 struct HA_CHECK_OPT;
@@ -123,11 +124,13 @@ bool mysql_discard_or_import_tablespace(THD *thd, Table_ref *table_list);
   data-dictionary cache entries and performing such invalidation.
 */
 class Foreign_key_parents_invalidator {
- private:
+ public:
   enum enum_invalidation_type {
     INVALIDATE_AND_CLOSE_TABLE,
     INVALIDATE_AND_MARK_FOR_REOPEN
   };
+
+ private:
   typedef std::map<std::pair<dd::String_type, dd::String_type>,
                    std::pair<handlerton *, enum_invalidation_type>>
       Parent_map;
@@ -475,7 +478,8 @@ bool mysql_compare_tables(THD *thd, TABLE *table, Alter_info *alter_info,
                           HA_CREATE_INFO *create_info, bool *metadata_equal);
 bool mysql_recreate_table(THD *thd, Table_ref *table_list, bool table_copy);
 bool mysql_create_like_table(THD *thd, Table_ref *table, Table_ref *src_table,
-                             HA_CREATE_INFO *create_info);
+                             HA_CREATE_INFO *create_info, uint open_flags = 0,
+                             bool skip_post_ddl_operations = false);
 bool mysql_rename_table(THD *thd, handlerton *base, const char *old_db,
                         const char *old_name, const char *old_fk_db,
                         const char *old_fk_name, const dd::Schema &new_schema,
@@ -666,6 +670,13 @@ bool prepare_check_constraints_for_create(THD *thd, const char *db_name,
 
 extern std::atomic_ulong deprecated_use_fk_on_non_standard_key_count;
 extern std::atomic_ullong deprecated_use_fk_on_non_standard_key_last_timestamp;
+
+/**
+  Unloads the materialized view from a secondary engine, where it might be
+  materialized.
+ */
+bool secondary_engine_unload_materialized_view(THD *thd, const Table_ref *view,
+                                               const dd::View *view_def);
 
 /**
   Resolves the secondary engine handled via its name and calls the unload

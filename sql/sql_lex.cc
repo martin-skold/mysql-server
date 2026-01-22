@@ -35,6 +35,7 @@
 #include "field_types.h"
 #include "m_string.h"
 #include "my_alloc.h"
+#include "my_bitmap.h"
 #include "my_dbug.h"
 #include "mysql/mysql_lex_string.h"
 #include "mysql/service_mysql_alloc.h"
@@ -51,12 +52,14 @@
 #include "sql/lexer_yystype.h"
 #include "sql/mysqld.h"  // table_alias_charset
 #include "sql/nested_join.h"
+#include "sql/olap.h"
 #include "sql/opt_hints.h"
 #include "sql/parse_location.h"
 #include "sql/parse_tree_nodes.h"  // PT_with_clause
 #include "sql/protocol.h"
 #include "sql/select_lex_visitor.h"
 #include "sql/sp_head.h"  // sp_head
+#include "sql/sp_instr_inline.h"
 #include "sql/sql_admin.h"
 #include "sql/sql_base.h"
 #include "sql/sql_class.h"  // THD
@@ -383,6 +386,12 @@ void Lex_input_stream::reduce_digest_token(uint token_left, uint token_right) {
   }
 }
 
+void Lex_input_stream::adjust_digest_by_numeric_column_token(ulonglong value) {
+  if (m_digest != nullptr) {
+    m_digest = digest_adjust_by_numeric_column_token(m_digest, value);
+  }
+}
+
 void LEX::assert_ok_set_current_query_block() {
   // (2) Only owning thread could change m_current_query_block
   // (1) bypass for bootstrap and "new THD"
@@ -411,6 +420,7 @@ void LEX::reset() {
   create_view_mode = enum_view_create_mode::VIEW_CREATE_NEW;
   create_view_type = enum_view_type::UNDEFINED;
   create_view_algorithm = VIEW_ALGORITHM_UNDEFINED;
+  create_view_materialization = false;
   create_view_suid = true;
 
   context_stack.clear();
@@ -863,6 +873,10 @@ Yacc_state::~Yacc_state() {
 }
 
 static bool consume_optimizer_hints(Lex_input_stream *lip) {
+  // Just return OK if there is nothing to scan/parse.
+  if (lip->eof()) {
+    return false;
+  }
   const my_lex_states *state_map = lip->query_charset->state_maps->main_map;
   int whitespace = 0;
   uchar c = lip->yyPeek();
@@ -2611,7 +2625,10 @@ bool Query_block::setup_base_ref_items(THD *thd) {
   uint n_elems = n_sum_items + n_child_sum_items + fields.size() +
                  select_n_having_items + select_n_where_fields +
                  order_group_num + n_scalar_subqueries;
-
+  if (sp_inl::needs_stored_function_inlining(thd)) {
+    // if inlined, stored function calls can become projection items
+    n_elems += n_stored_func_calls;
+  }
   /*
     If it is possible that we transform IN(subquery) to a join to a derived
     table, we will be adding DISTINCT, and we will also be adding one
@@ -2646,10 +2663,11 @@ bool Query_block::setup_base_ref_items(THD *thd) {
 
   DBUG_PRINT(
       "info",
-      ("setup_ref_array this %p %4u : %4u %4u %4zu %4u %4u %4u %4u", this,
+      ("setup_ref_array this %p %4u : %4u %4u %4zu %4u %4u %4u %4u %4u", this,
        n_elems,  // :
        n_sum_items, n_child_sum_items, fields.size(), select_n_having_items,
-       select_n_where_fields, order_group_num, n_scalar_subqueries));
+       select_n_where_fields, order_group_num, n_scalar_subqueries,
+       n_stored_func_calls));
   if (!base_ref_items.is_null()) {
     /*
       This should not happen, as it's the sign of preparing an already-prepared
@@ -3444,18 +3462,49 @@ void Query_block::print_group_by(const THD *thd, String *str,
   // group by & olap
   if (group_list.elements) {
     str->append(STRING_WITH_LEN(" group by "));
-    if (olap == CUBE_TYPE) {
-      str->append(STRING_WITH_LEN("cube ("));
-    }
-    print_order(thd, str, group_list.first, query_type);
     switch (olap) {
-      case ROLLUP_TYPE:
-        str->append(STRING_WITH_LEN(" with rollup"));
+      case CUBE_TYPE: {
+        str->append(STRING_WITH_LEN("cube ("));
         break;
-      case CUBE_TYPE:
+      }
+      case GROUPING_SETS_TYPE: {
+        str->append(STRING_WITH_LEN("grouping sets ("));
+        break;
+      }
+      default:
+        break;
+    }
+    if (is_non_primitive_grouped() && olap == GROUPING_SETS_TYPE) {
+      for (int gs_num = 0; gs_num < m_num_grouping_sets; gs_num++) {
+        str->append(STRING_WITH_LEN("("));
+        bool is_first_element_in_set = true;
+        for (auto *grp = group_list.first; grp != nullptr; grp = grp->next) {
+          /* Check if the GROUP BY element is pat of the current grouping set */
+          if (bitmap_is_set(grp->grouping_set_info, gs_num)) {
+            if (is_first_element_in_set) {
+              is_first_element_in_set = false;
+            } else {
+              str->append(',');
+            }
+            grp->item[0]->print_for_order(thd, str, query_type,
+                                          grp->used_alias);
+          }
+        }
         str->append(STRING_WITH_LEN(")"));
-        break;
-      default:;  // satisfy compiler
+        if (gs_num + 1 < m_num_grouping_sets) {
+          str->append(',');
+        }
+      }
+    } else {
+      print_order(thd, str, group_list.first, query_type);
+    }
+
+    if (is_non_primitive_grouped()) {
+      if (olap == ROLLUP_TYPE) {
+        str->append(STRING_WITH_LEN(" with rollup"));
+      } else {
+        str->append(STRING_WITH_LEN(")"));
+      }
     }
   }
 }

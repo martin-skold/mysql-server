@@ -6,6 +6,9 @@
 --source include/force_myisam_default.inc
 --source include/have_myisam.inc
 
+# This test doesn't support GTID
+--source include/rpl/set_gtid_mode_off.inc
+
 SET sql_mode = 'ONLY_FULL_GROUP_BY,NO_ENGINE_SUBSTITUTION';
 
 #
@@ -1448,7 +1451,7 @@ DROP DATABASE gis_ogs;
 --echo #
 
 --error ER_GIS_INVALID_DATA
-SELECT ST_Union('', ''), md5(1);
+SELECT ST_Union('', ''), SHA2(1,256);
 
 --echo #
 --echo # Bug#18413646: SINCE 5.7 ERROR 1416 IS CONSIDERED FATAL,
@@ -4251,3 +4254,6 @@ UPDATE t1 SET geom = DEFAULT;
 
 SET sql_mode= @orig_sql_mode;
 DROP TABLE t1;
+
+# Restore the default for gtid_mode which is ON
+--source include/rpl/set_gtid_mode_on.inc

@@ -5120,10 +5120,24 @@ static bool prepare_key_column(THD *thd, HA_CREATE_INFO *create_info,
     return true;
   }
 
-  // VECTOR columns cannot be used as keys
+  // VECTOR columns cannot be used as keys,
+  // except if the index is specified as a VECTOR index
+  // on only one column of the type VECTOR
+  // and when the storage engine supports it
   if (sql_field->sql_type == MYSQL_TYPE_VECTOR) {
-    my_error(ER_NON_SCALAR_USED_AS_KEY, MYF(0), column->get_field_name());
-    return true;
+    if (key->key_create_info.algorithm != HA_KEY_ALG_VECTOR_DISTANCE) {
+      my_error(ER_NON_SCALAR_USED_AS_KEY, MYF(0), column->get_field_name());
+      return true;
+    }
+    if (! file->is_index_algorithm_supported(key->key_create_info.algorithm)) {
+      my_error(ER_FEATURE_UNSUPPORTED, MYF(0), "VECTOR INDEX", "only supported by the NDBCLUSTER storage engine");
+      return true;
+    }
+    if (key->columns.size() != 1) {
+      my_error(ER_FEATURE_UNSUPPORTED, MYF(0), "multi-column VECTOR INDEX", "however, several VECTOR INDEX per table can be defined");
+      return true;
+    }
+    key_info->flags |= HA_VECTOR_INDEX;
   }
 
   if (sql_field->auto_flags & Field::NEXT_NUMBER) {
@@ -5187,6 +5201,7 @@ static bool prepare_key_column(THD *thd, HA_CREATE_INFO *create_info,
       case MYSQL_TYPE_MEDIUM_BLOB:
       case MYSQL_TYPE_LONG_BLOB:
       case MYSQL_TYPE_BLOB:
+      case MYSQL_TYPE_VECTOR:
       case MYSQL_TYPE_JSON:
       case MYSQL_TYPE_VAR_STRING:
       case MYSQL_TYPE_STRING:
@@ -5352,8 +5367,7 @@ static bool prepare_key_column(THD *thd, HA_CREATE_INFO *create_info,
         if (key->type == KEYTYPE_MULTIPLE) {
           /* not a critical problem */
           push_warning_printf(thd, Sql_condition::SL_WARNING, ER_TOO_LONG_KEY,
-                              ER_THD(thd, ER_TOO_LONG_KEY),
-                              static_cast<int>(key_part_length));
+                              ER_THD(thd, ER_TOO_LONG_KEY), static_cast<int>(key_part_length));
           /* Align key length to multibyte char boundary */
           key_part_length -= key_part_length % sql_field->charset->mbmaxlen;
           /*
@@ -5367,6 +5381,13 @@ static bool prepare_key_column(THD *thd, HA_CREATE_INFO *create_info,
         }
       }
     }  // is_blob
+    // Check if vector index with constrained dimensions
+    else if (sql_field->sql_type == MYSQL_TYPE_VECTOR &&
+             column_length < key_part_length &&
+	     // does the storage engine support vector search?
+	     (file->ha_table_flags() & HA_VECTOR_INDEX_SUPPORT)) {
+      key_part_length = column_length;
+    }
     // Catch invalid use of partial keys
     else if (sql_field->sql_type != MYSQL_TYPE_GEOMETRY &&
              // is the key partial?
@@ -5408,10 +5429,12 @@ static bool prepare_key_column(THD *thd, HA_CREATE_INFO *create_info,
       key->type != KEYTYPE_FULLTEXT) {
     key_part_length = file->max_key_part_length(create_info);
     if (key->type == KEYTYPE_MULTIPLE) {
-      /* not a critical problem */
-      push_warning_printf(thd, Sql_condition::SL_WARNING, ER_TOO_LONG_KEY,
-                          ER_THD(thd, ER_TOO_LONG_KEY),
-                          static_cast<int>(key_part_length));
+      if (key->key_create_info.algorithm != HA_KEY_ALG_VECTOR_DISTANCE) {
+	/* not a critical problem */
+	push_warning_printf(thd, Sql_condition::SL_WARNING, ER_TOO_LONG_KEY,
+			    ER_THD(thd, ER_TOO_LONG_KEY),
+			    static_cast<int>(key_part_length));
+      }
       /* Align key length to multibyte char boundary */
       key_part_length -= key_part_length % sql_field->charset->mbmaxlen;
       /*
@@ -5426,8 +5449,9 @@ static bool prepare_key_column(THD *thd, HA_CREATE_INFO *create_info,
                key_part_length);
       return true;
     } else {
-      if (!is_json_pk_on_external_table(file->ht->flags, key->type,
-                                        sql_field->sql_type)) {
+      if ((!is_json_pk_on_external_table(file->ht->flags, key->type,
+                                        sql_field->sql_type)) ||
+	  (key->key_create_info.algorithm != HA_KEY_ALG_VECTOR_DISTANCE)) {
         my_error(ER_TOO_LONG_KEY, MYF(0), key_part_length);
         if (thd->is_error()) return true;
       }
@@ -7746,9 +7770,11 @@ static bool prepare_key(
 
   if (key_info->key_length > file->max_key_length() &&
       key->type != KEYTYPE_FULLTEXT) {
-    my_error(ER_TOO_LONG_KEY, MYF(0), file->max_key_length());
-    if (thd->is_error())  // May be silenced - see Bug#20629014
-      return true;
+    if (key->key_create_info.algorithm != HA_KEY_ALG_VECTOR_DISTANCE) {
+      my_error(ER_TOO_LONG_KEY, MYF(0), file->max_key_length());
+      if (thd->is_error())  // May be silenced - see Bug#20629014
+	return true;
+    }
   }
 
   /*

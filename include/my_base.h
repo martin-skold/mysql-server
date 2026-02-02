@@ -105,10 +105,11 @@ enum ha_key_alg {
           SEs default algorithm for keys in mysql_prepare_create_table().
   */
   HA_KEY_ALG_SE_SPECIFIC = 0,
-  HA_KEY_ALG_BTREE = 1,   /* B-tree. */
-  HA_KEY_ALG_RTREE = 2,   /* R-tree, for spatial searches */
-  HA_KEY_ALG_HASH = 3,    /* HASH keys (HEAP, NDB). */
-  HA_KEY_ALG_FULLTEXT = 4 /* FULLTEXT. */
+  HA_KEY_ALG_BTREE = 1,            /* B-tree. */
+  HA_KEY_ALG_RTREE = 2,            /* R-tree, for spatial searches */
+  HA_KEY_ALG_HASH = 3,             /* HASH keys (HEAP, NDB). */
+  HA_KEY_ALG_FULLTEXT = 4,         /* FULLTEXT. */
+  HA_KEY_ALG_VECTOR_DISTANCE = 5   /* VECTOR similarity search (NDB) */
 };
 
 /* Storage media types */
@@ -521,6 +522,9 @@ enum ha_base_keytype {
 #define HA_USES_COMMENT (1 << 12)
 /** Key was automatically created to support Foreign Key constraint. */
 #define HA_GENERATED_KEY (1 << 13)
+
+/** Vector search index */
+#define HA_VECTOR_INDEX (1 << 14)
 
 /* The combination of the above can be used for key type comparison. */
 #define HA_KEYFLAG_MASK                                                       \

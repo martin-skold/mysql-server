@@ -2700,6 +2700,8 @@ bool store_create_info(THD *thd, Table_ref *table_list, String *packet,
       packet->append(STRING_WITH_LEN("FULLTEXT KEY "));
     else if (key_info->flags & HA_SPATIAL)
       packet->append(STRING_WITH_LEN("SPATIAL KEY "));
+    else if (key_info->flags & HA_VECTOR_INDEX)
+      packet->append(STRING_WITH_LEN("VECTOR INDEX "));
     else
       packet->append(STRING_WITH_LEN("KEY "));
 

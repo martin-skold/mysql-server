@@ -528,6 +528,11 @@ enum class SelectExecutedIn : bool { kPrimaryEngine, kSecondaryEngine };
 */
 #define HA_MULTI_VALUED_KEY_SUPPORT (1LL << 55)
 
+/**
+  Supports vector index
+*/
+#define HA_VECTOR_INDEX_SUPPORT (1LL << 56)
+
 /*
   Bits in index_flags(index_number) for what you can do with index.
   If you do not implement indexes, just return zero here.

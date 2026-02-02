@@ -1488,6 +1488,9 @@ CHARSET_INFO *warn_on_deprecated_user_defined_collation(
 %token<lexer.keyword> SETS_SYM        1238   /* SQL-1999-N */
 %token<lexer.keyword> VALIDATE_SYM    1239     /* MYSQL */
 
+%token<lexer.keyword> DISTANCE_SYM    1240
+/* MYSQL */
+
 /*
   NOTE! When adding new non-standard keywords, make sure they are added to the
   list ident_keywords_unambiguous lest they become reserved keywords.
@@ -8085,6 +8088,7 @@ index_type:
           BTREE_SYM { $$= HA_KEY_ALG_BTREE; }
         | RTREE_SYM { $$= HA_KEY_ALG_RTREE; }
         | HASH_SYM  { $$= HA_KEY_ALG_HASH; }
+        | DISTANCE_SYM { $$= HA_KEY_ALG_VECTOR_DISTANCE; }
         ;
 
 key_list:
@@ -10794,6 +10798,14 @@ function_call_keyword:
         | DAY_SYM '(' expr ')'
           {
             $$= NEW_PTN Item_func_dayofmonth(@$, $3);
+          }
+        | DISTANCE_SYM '(' expr ',' expr ')'
+          {
+            $$= NEW_PTN Item_func_vector_distance(@$, $3, $5);
+          }
+        | DISTANCE_SYM '(' expr ',' expr ',' expr ')'
+          {
+            $$= NEW_PTN Item_func_vector_distance(@$, $3, $5, $7);
           }
         | HOUR_SYM '(' expr ')'
           {
@@ -15990,6 +16002,7 @@ ident_keywords_unambiguous:
         | DISABLE_SYM
         | DISCARD_SYM
         | DISK_SYM
+        | DISTANCE_SYM %prec KEYWORD_USED_AS_IDENT
         | DUALITY_SYM
         | DUMPFILE
         | DUPLICATE_SYM

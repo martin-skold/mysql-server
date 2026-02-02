@@ -1,0 +1,57 @@
+source include/have_ndb.inc;
+
+create table t1 (
+  pk int primary key,
+  embedding vector(7435)
+  ) engine ndbcluster;
+let $i = 200;
+let $s = insert into t1 (pk,embedding) values;
+begin;
+while($i){
+  let $s=$s ($i,
+             STRING_TO_VECTOR(CONCAT('[',REPEAT('3$i,',7434),'$i]'))),;
+  dec $i;
+}
+let $s=$s ($i,
+           STRING_TO_VECTOR(CONCAT('[',REPEAT('3$i,',7434),'$i]')));
+disable_query_log;
+--echo # Insert 201 rows
+eval $s;
+# TODO: NULL rows
+enable_query_log;
+commit;
+analyze table t1;
+
+select pk, embedding, vector_dim(embedding) from t1 order by pk limit 1;
+
+create index vi using distance on t1(embedding);
+
+--let $ndb_describe_table= t1
+--let $ndb_describe_indexes= 1
+--source suite/ndb/include/ndb_describe_table.inc
+
+--echo # Delete 201 rows
+delete from t1;
+disable_query_log;
+--echo # Insert 201 rows again
+eval $s;
+enable_query_log;
+
+drop tables t1;
+
+# Some missing wait for dropping all schema objects
+--sleep 10
+
+create table t1 (
+  pk int primary key,
+  embedding vector(4),
+  index vi(embedding) using distance
+  ) engine ndbcluster;
+
+insert into t1 values (1, string_to_vector("[1.01231, 2.0123123, 3.0123123, 4.01231231]")),(2, string_to_vector("[1.00231, 2.0123123, 3.0128123, 4.01231231]")),(3, string_to_vector("[1.01291, 2.0123123, 3.0003123, 4.01231231]")),(4, string_to_vector("[1.01231, 2.9923123, 3.0123123, 4.00331231]")),(5, string_to_vector("[1, 2, 3, 4]"));
+
+select pk, distance(string_to_vector("[1, 2, 3, 4]"), embedding, "cosine") from t1 order by pk;
+
+select pk, embedding from t1 where distance(string_to_vector("[1, 2, 3, 4]"), embedding, "cosine") < 0.000001 order by pk;
+
+drop tables t1;

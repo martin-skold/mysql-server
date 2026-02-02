@@ -38,6 +38,7 @@ class AccLockReq {
   friend class Dbacc;
   friend class Dbtup;
   friend class Dbtux;
+  friend class Dbvctr;
   friend bool printACC_LOCKREQ(FILE *, const Uint32 *, Uint32, Uint16);
 
  public:

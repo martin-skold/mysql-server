@@ -137,7 +137,8 @@ class NdbDictionary {
       ForeignKey = 25,
       FKParentTrigger = 26,
       FKChildTrigger = 27,
-      FullyReplicatedTrigger = 28
+      FullyReplicatedTrigger = 28,
+      VectorIndex = 29           ///< Vector index for similarity search
     };
 
     /**
@@ -1331,7 +1332,8 @@ class NdbDictionary {
       Undefined = 0,        ///< Undefined object type (initial value)
       UniqueHashIndex = 3,  ///< Unique un-ordered hash index
                             ///< (only one currently supported)
-      OrderedIndex = 6      ///< Non-unique ordered index
+      OrderedIndex = 6,     ///< Non-unique ordered index
+      VectorIndex = 29     ///< Non-unique ordered index
     };
 
     /**

@@ -90,6 +90,7 @@ struct mt_BuildIndxReq {
   Uint32 fragId;
 
   void *tux_ptr;  // ptr to Dbtux
+  void *vctr_ptr; // ptr to Dbvctr
   void *tup_ptr;
   Uint32 (*func_ptr)(void *);  // c-function
 

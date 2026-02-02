@@ -239,7 +239,12 @@ class DictTabInfo {
      */
     FullyReplicatedTrigger = 28,
 
-    SchemaTransaction = 30
+    SchemaTransaction = 30,
+
+    /**
+     * Vector Index
+     */
+    VectorIndex = 31
   };
 
   // used 1) until type BlobTable added 2) in upgrade code

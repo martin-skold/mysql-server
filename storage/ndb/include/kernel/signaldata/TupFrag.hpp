@@ -90,6 +90,7 @@ class TupFragRef {
 class TuxFragReq {
   friend class Dblqh;
   friend class Dbtux;
+  friend class Dbvctr;
 
  public:
   static constexpr Uint32 SignalLength = 9;
@@ -109,6 +110,7 @@ class TuxFragReq {
 class TuxFragConf {
   friend class Dblqh;
   friend class Dbtux;
+  friend class Dbvctr;
 
  public:
   static constexpr Uint32 SignalLength = 4;
@@ -123,6 +125,7 @@ class TuxFragConf {
 class TuxFragRef {
   friend class Dblqh;
   friend class Dbtux;
+  friend class Dbvctr;
 
  public:
   static constexpr Uint32 SignalLength = 2;
@@ -143,6 +146,7 @@ class TuxFragRef {
 class TupAddAttrReq {
   friend class Dblqh;
   friend class Dbtux;
+  friend class Dbvctr;
 
  public:
   static constexpr Uint32 SignalLength = 5;
@@ -191,6 +195,7 @@ class TupAddAttrRef {
 class TuxAddAttrReq {
   friend class Dblqh;
   friend class Dbtux;
+  friend class Dbvctr;
 
  public:
   static constexpr Uint32 SignalLength = 6;
@@ -207,6 +212,7 @@ class TuxAddAttrReq {
 class TuxAddAttrConf {
   friend class Dblqh;
   friend class Dbtux;
+  friend class Dbvctr;
 
  public:
   static constexpr Uint32 SignalLength = 2;
@@ -219,6 +225,7 @@ class TuxAddAttrConf {
 class TuxAddAttrRef {
   friend class Dblqh;
   friend class Dbtux;
+  friend class Dbvctr;
 
  public:
   static constexpr Uint32 SignalLength = 2;

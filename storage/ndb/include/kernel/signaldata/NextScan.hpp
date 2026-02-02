@@ -35,6 +35,7 @@ class NextScanReq {
   friend class Dbacc;
   friend class Dbtux;
   friend class Dbtup;
+  friend class Dbvctr;
 
  public:
   // two sets of defs picked from lqh/acc
@@ -58,6 +59,7 @@ class NextScanConf {
   friend class Dbtux;
   friend class Dbtup;
   friend class Dblqh;
+  friend class Dbvctr;
 
  public:
   // length is less if no keyinfo or no next result
@@ -77,6 +79,7 @@ class NextScanRef {
   friend class Dbtux;
   friend class Dbtup;
   friend class Dblqh;
+  friend class Dbvctr;
 
  public:
   static constexpr Uint32 SignalLength = 4;

@@ -290,6 +290,13 @@ class DumpStateOrd {
     DbinfoListColumns = 14002,
     DbinfoScanTable = 14003,
 
+    // 15000 Vctr
+    VctrLogToFile = 15001,
+    VctrSetLogFlags = 15002,
+    VctrMetaDataJunk = 15009,
+    VctrSetTransientPoolMaxSize = 15010,
+    VctrResetTransientPoolMaxSize = 15011,
+
     SchemaResourceSnapshot = 4000,   // Save resource consumption
     SchemaResourceCheckLeak = 4001,  // check same as snapshot
 

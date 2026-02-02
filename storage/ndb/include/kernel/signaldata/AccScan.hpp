@@ -46,6 +46,7 @@ class AccScanReq {
   friend class Dbacc;
   friend class Dbtux;
   friend class Dbtup;
+  friend class Dbvctr;
 
  public:
   static constexpr Uint32 SignalLength = 8;
@@ -196,6 +197,7 @@ class AccScanConf {
   friend class Dbacc;
   friend class Dbtux;
   friend class Dbtup;
+  friend class Dbvctr;
 
   /**
    * Reciver(s)
@@ -223,6 +225,7 @@ class AccScanRef {
   friend class Dblqh;
   friend class Dbtup;
   friend class Dbacc;
+  friend class Dbvctr;
 
   enum ErrorCode {
     TuxNoFreeScanOp = 909,
@@ -247,6 +250,8 @@ class AccCheckScan {
   friend class Dbtux;
   friend class Dbtup;
   friend class Dblqh;
+  friend class Dbvctr;
+
   enum {
     ZCHECK_LCP_STOP = 0,     // Execution should check-in with LQH
     ZNOT_CHECK_LCP_STOP = 1  // Execution should not check-in with LQH
@@ -265,6 +270,7 @@ class CheckLcpStop {
   friend class Dbtux;
   friend class Dbtup;
   friend class Dblqh;
+  friend class Dbvctr;
 
   enum ScanState {
     ZSCAN_RUNNABLE = 0,                // Scan runnable immediately

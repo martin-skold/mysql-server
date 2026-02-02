@@ -814,6 +814,9 @@ void Dbdict::packTableIntoPages(Signal *signal) {
     case DictTabInfo::FKChildTrigger:
     case DictTabInfo::FullyReplicatedTrigger:
       ndbabort();
+    case DictTabInfo::VectorIndex: {
+      // To be defined
+    }
   }
 
   Uint32 wordsOfTable = w.getWordsUsed();

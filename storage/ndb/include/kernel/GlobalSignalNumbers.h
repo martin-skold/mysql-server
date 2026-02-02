@@ -36,7 +36,7 @@
  * version there signal may be sent. The signal number must remain reserved and
  * handled by receiver until that version is no longer supported.
  */
-const GlobalSignalNumber MAX_GSN = 850;
+const GlobalSignalNumber MAX_GSN = 860;
 
 struct GsnName {
   GlobalSignalNumber gsn;
@@ -1217,4 +1217,21 @@ extern const GlobalSignalNumber NO_OF_SIGNAL_NAMES;
 #define GSN_UPD_THR_LOAD_ORD 849
 
 #define GSN_TRP_KEEP_ALIVE 850
+
+/*
+ * VCTR
+ */
+#define GSN_VCTRFRAGREQ 851
+#define GSN_VCTRFRAGCONF 852
+#define GSN_VCTRFRAGREF 853
+#define GSN_VCTR_ADD_ATTRREQ 854
+#define GSN_VCTR_ADD_ATTRCONF 855
+#define GSN_VCTR_ADD_ATTRREF 856
+
+#define GSN_VCTR_MAINT_REQ 857
+#define GSN_VCTR_MAINT_CONF 858
+#define GSN_VCTR_MAINT_REF 859
+
+#define GSN_VCTR_BOUND_INFO 860
+
 #endif

@@ -75,7 +75,9 @@
 #define DBQTUX 0x10E
 #define QBACKUP 0x10F
 #define QRESTORE 0x110
-#define V_QUERY 0x111
+#define DBVCTR 0x111
+#define DBQVCTR 0x112
+#define V_QUERY 0x113
 
 const BlockReference BACKUP_REF = numberToRef(BACKUP, 0);
 const BlockReference QBACKUP_REF = numberToRef(QBACKUP, 0);
@@ -106,6 +108,8 @@ const BlockReference DBINFO_REF = numberToRef(DBINFO, 0);
 const BlockReference DBSPJ_REF = numberToRef(DBSPJ, 0);
 const BlockReference THRMAN_REF = numberToRef(THRMAN, 0);
 const BlockReference TRPMAN_REF = numberToRef(TRPMAN, 0);
+const BlockReference DBVCTR_REF = numberToRef(DBVCTR, 0);
+const BlockReference DBQVCTR_REF = numberToRef(DBQVCTR, 0);
 
 static inline void __hide_warnings_unused_ref_vars(void) {
   // Hide annoying warnings about unused variables
@@ -138,10 +142,12 @@ static inline void __hide_warnings_unused_ref_vars(void) {
   (void)QRESTORE_REF;
   (void)QBACKUP_REF;
   (void)DBQTUX_REF;
+  (void)DBVCTR_REF;
 }
 
 const BlockNumber MIN_BLOCK_NO = BACKUP;
-const BlockNumber MAX_BLOCK_NO = QRESTORE;
+//const BlockNumber MAX_BLOCK_NO = QRESTORE;
+const BlockNumber MAX_BLOCK_NO = DBQVCTR;
 const BlockNumber NO_OF_BLOCKS = (MAX_BLOCK_NO - MIN_BLOCK_NO + 1);
 
 #endif

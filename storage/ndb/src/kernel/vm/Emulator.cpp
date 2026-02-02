@@ -675,6 +675,27 @@ static const char *const jamFileNames[] = {
     "QRestoreProxy.cpp",                  // 540
     "TrpKeepAlive.hpp",                   // 541
     "TrpKeepAlive.cpp",                   // 542
+    "DbvctrGen.cpp",                      // 543
+    "DbvctrDebug.cpp",                    // 544
+    "DbvctrStat.cpp",                     // 545
+    "DbvctrSearch.cpp",                   // 546
+    "DbvctrMaint.cpp",                    // 547
+    "DbvctrProxy.cpp",                    // 548
+    "DbvctrMeta.cpp",                     // 549
+    "DbvctrScan.cpp",                     // 550
+    "DbvctrNode.cpp",                     // 551
+    "VctrBound.hpp",                      // 552
+    "VctrMaint.hpp",                      // 553
+    "VctrContinueB.hpp",                  // 554
+    "DbvctrBuild.cpp",                    // 555
+    "Dbvctr.hpp",                         // 556
+    "DbvctrGraph.cpp",                    // 557
+    "DbvctrProxy.hpp",                    // 558
+    "DbvctrMeta.cpp",                     // 559
+    "Dbqvctr.hpp",                        // 560
+    "Dbqvctr.cpp",                        // 561
+    "DbqvctrProxy.hpp",                   // 562
+    "DbqvctrProxy.cpp"                    // 563
 };
 
 bool JamEvent::verifyId(Uint32 fileId, const char *pathName) {

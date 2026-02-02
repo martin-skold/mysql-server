@@ -114,4 +114,5 @@ ADD_CONVENIENCE_LIBRARY(ndbsignaldata
   UtilLock.cpp
   UtilPrepare.cpp
   UtilSequence.cpp
+  VctrMaint.cpp
   )

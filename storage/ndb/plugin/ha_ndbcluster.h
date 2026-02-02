@@ -68,7 +68,8 @@ enum NDB_INDEX_TYPE {
   PRIMARY_KEY_ORDERED_INDEX = 2,
   UNIQUE_INDEX = 3,
   UNIQUE_ORDERED_INDEX = 4,
-  ORDERED_INDEX = 5
+  ORDERED_INDEX = 5,
+  VECTOR_INDEX = 6
 };
 
 struct NDB_INDEX_DATA {
@@ -281,7 +282,10 @@ class ha_ndbcluster : public handler, public Partition_handler {
     return HA_KEY_ALG_BTREE;
   }
   bool is_index_algorithm_supported(enum ha_key_alg key_alg) const override {
-    return key_alg == HA_KEY_ALG_BTREE || key_alg == HA_KEY_ALG_HASH;
+    return
+      key_alg == HA_KEY_ALG_BTREE ||
+      key_alg == HA_KEY_ALG_HASH ||
+      key_alg == HA_KEY_ALG_VECTOR_DISTANCE;
   }
 
   double scan_time() override;

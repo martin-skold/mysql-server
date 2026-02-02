@@ -49,6 +49,7 @@ class NodeStateRep {
   friend class Dbtux;
   friend class Dbacc;
   friend class Dbtup;
+  friend class Dbvctr;
 
  public:
   static constexpr Uint32 SignalLength = NodeState::DataLength;

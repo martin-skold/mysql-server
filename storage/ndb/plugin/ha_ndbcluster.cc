@@ -1176,6 +1176,8 @@ void ha_ndbcluster::set_rec_per_key(THD *thd) {
           // no fallback method...
           break;
         }
+      case VECTOR_INDEX:  // index is currently unavailable
+        break;
       case UNDEFINED_INDEX:  // index is currently unavailable
         break;
     }
@@ -2298,6 +2300,9 @@ int ha_ndbcluster::open_index(NdbDictionary::Dictionary *dict,
     case ORDERED_INDEX:
       if (!index_data.index) idx_type = UNDEFINED_INDEX;
       break;
+    case VECTOR_INDEX:
+      if (!index_data.index) idx_type = UNDEFINED_INDEX;
+      break;
   }
   index_data.type = idx_type;
 
@@ -2761,6 +2766,8 @@ ulong ha_ndbcluster::index_flags(uint idx_no, uint, bool) const {
     case ORDERED_INDEX:
       return HA_READ_NEXT | HA_READ_PREV | HA_READ_RANGE | HA_READ_ORDER |
              HA_KEY_SCAN_NOT_ROR;
+    case VECTOR_INDEX:
+      return HA_READ_NEXT;
   }
   assert(false);  // unreachable
   return 0;
@@ -13166,7 +13173,8 @@ ulonglong ha_ndbcluster::table_flags(void) const {
                 HA_PRIMARY_KEY_REQUIRED_FOR_POSITION | HA_PARTIAL_COLUMN_READ |
                 HA_HAS_OWN_BINLOGGING | HA_BINLOG_ROW_CAPABLE |
                 HA_COUNT_ROWS_INSTANT | HA_READ_BEFORE_WRITE_REMOVAL |
-                HA_GENERATED_COLUMNS | HA_SUPPORTS_DEFAULT_EXPRESSION | 0;
+                HA_GENERATED_COLUMNS | HA_SUPPORTS_DEFAULT_EXPRESSION |
+                HA_VECTOR_INDEX_SUPPORT | 0;
 
   /*
     To allow for logging of NDB tables during stmt based logging;

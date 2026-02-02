@@ -111,6 +111,19 @@ ADD_STATIC_LIBRARY(ndbblocks
   dbtux/DbtuxStat.cpp
   dbtux/DbtuxTree.cpp
   dbutil/DbUtil.cpp
+  dbvctr/Dbqvctr.cpp
+  dbvctr/DbqvctrProxy.cpp
+  dbvctr/DbvctrBuild.cpp
+  dbvctr/DbvctrDebug.cpp
+  dbvctr/DbvctrGen.cpp
+  dbvctr/DbvctrMaint.cpp
+  dbvctr/DbvctrMeta.cpp
+  dbvctr/DbvctrNode.cpp
+  dbvctr/DbvctrProxy.cpp
+  dbvctr/DbvctrScan.cpp
+  dbvctr/DbvctrSearch.cpp
+  dbvctr/DbvctrStat.cpp
+  dbvctr/DbvctrGraph.cpp
   diskpage.cpp
   lgman.cpp
   ndbcntr/NdbcntrInit.cpp

@@ -80,7 +80,8 @@
 #define NEW_BLOCK(B) new B
 
 void SimBlockList::load(EmulatorData &data) {
-  noOfBlocks = NO_OF_BLOCKS;
+  //noOfBlocks = NO_OF_BLOCKS;
+  noOfBlocks = NO_OF_BLOCKS - 2; // remove when VCTR is implemeted
   theList = new SimulatedBlock *[noOfBlocks];
   if (!theList) {
     ERROR_SET(fatal, NDBD_EXIT_MEMALLOC, "Failed to create the block list", "");
@@ -166,7 +167,8 @@ void SimBlockList::load(EmulatorData &data) {
   theList[26] = NEW_BLOCK(DbqtuxProxy)(ctx);
   theList[27] = NEW_BLOCK(QBackupProxy)(ctx);
   theList[28] = NEW_BLOCK(QRestoreProxy)(ctx);
-  assert(NO_OF_BLOCKS == 29);
+  //theList[29] = NEW_BLOCK(DbvctrProxy)(ctx);
+  assert(NO_OF_BLOCKS == 31);
 
   // Check that all blocks could be created
   for (int i = 0; i < noOfBlocks; i++) {

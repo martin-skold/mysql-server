@@ -159,6 +159,8 @@
 #include "storage/perfschema/terminology_use_previous.h"
 #endif /* WITH_PERFSCHEMA_STORAGE_ENGINE */
 
+#include "vector-common/vector_distance.h"
+
 static constexpr const unsigned long DEFAULT_ERROR_COUNT{1024};
 static constexpr const unsigned long DEFAULT_SORT_MEMORY{256UL * 1024UL};
 static constexpr const unsigned HOST_CACHE_SIZE{128};
@@ -2320,6 +2322,20 @@ static Sys_var_keycache Sys_key_cache_age_threshold(
     CMD_LINE(REQUIRED_ARG, OPT_KEY_CACHE_AGE_THRESHOLD),
     VALID_RANGE(100, ULONG_MAX), DEFAULT(300), BLOCK_SIZE(100), NO_MUTEX_GUARD,
     NOT_IN_BINLOG, ON_CHECK(nullptr), ON_UPDATE(update_keycache_param));
+
+static bool check_vector_distance_algorithm(sys_var *, THD *, set_var *var [[maybe_unused]]) {
+  return !check_vector_distance_algorithm(var->save_result.string_value.str,
+                                          var->save_result.string_value.length);
+}
+static Sys_var_charptr Sys_vector_distance_default_algorithm(
+    "vector_distance_default_algorithm",
+    "Sets the deafult vector distance algorithm "
+    "Affects the DISTANCE function and VECTOR INDEX.",
+    SESSION_VAR(vector_distance_default_algorithm),
+    CMD_LINE(OPT_ARG), IN_SYSTEM_CHARSET,
+    DEFAULT(default_distance_algorithm_name), NO_MUTEX_GUARD, IN_BINLOG,
+    ON_CHECK(check_vector_distance_algorithm),
+    ON_UPDATE(nullptr), nullptr, sys_var::PARSE_EARLY);
 
 static Sys_var_bool Sys_large_files_support(
     "large_files_support",

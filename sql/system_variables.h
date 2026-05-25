@@ -518,6 +518,13 @@ struct System_variables {
     @sa Sys_restrict_fk_on_non_standard_key
   */
   bool restrict_fk_on_non_standard_key;
+
+  /**
+     Sets the deafult vector distance algorithm "
+    "Affects the DISTANCE function and VECTOR INDEX."
+    @sa Sys_vector_distance_default_algorithm
+  */
+  char *vector_distance_default_algorithm;
 };
 
 static_assert(std::is_trivially_copyable<System_variables>::value);

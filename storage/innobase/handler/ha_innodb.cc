@@ -15120,6 +15120,7 @@ int ha_innobase::get_extra_columns_and_keys(const HA_CREATE_INFO *,
             continue;
           case dd::Index::IT_FULLTEXT:
           case dd::Index::IT_SPATIAL:
+          case dd::Index::IT_VECTOR_INDEX:
             ut_d(ut_error);
         }
         break;
@@ -15128,6 +15129,9 @@ int ha_innobase::get_extra_columns_and_keys(const HA_CREATE_INFO *,
           has_fulltext = true;
           continue;
         }
+        ut_d(ut_error);
+        ut_o(break);
+      case dd::Index::IA_VECTOR_DISTANCE:
         ut_d(ut_error);
         ut_o(break);
     }
@@ -15157,6 +15161,7 @@ int ha_innobase::get_extra_columns_and_keys(const HA_CREATE_INFO *,
         case dd::Index::IT_MULTIPLE:
         case dd::Index::IT_FULLTEXT:
         case dd::Index::IT_SPATIAL:
+        case dd::Index::IT_VECTOR_INDEX:
           my_error(ER_INNODB_FT_WRONG_DOCID_INDEX, MYF(0),
                    fts_doc_id_index->name().c_str());
           push_warning(thd, Sql_condition::SL_WARNING, ER_WRONG_NAME_FOR_INDEX,

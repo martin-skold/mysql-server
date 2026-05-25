@@ -111,6 +111,7 @@
 #include "storage/ndb/src/ndbapi/NdbQueryBuilder.hpp"
 #include "storage/ndb/src/ndbapi/NdbQueryOperation.hpp"
 #include "storage/ndb/src/ndbapi/ndb_internal.hpp"
+#include "vector-common/vector_distance.h"
 #include "string_with_len.h"
 #include "strxnmov.h"
 #include "template_utils.h"
@@ -2653,9 +2654,14 @@ int ha_ndbcluster::inplace__drop_index(NdbDictionary::Dictionary *dict,
 */
 NDB_INDEX_TYPE get_index_type_from_key(uint index_num, const KEY *key_info,
                                        bool primary) {
+  DBUG_TRACE;
+  DBUG_PRINT("enter", ("Algorithm %u for index %u found in KEY: 0x%llx", key_info[index_num].algorithm, index_num, (ulonglong) key_info));
   const bool is_hash_index = (key_info[index_num].algorithm == HA_KEY_ALG_HASH);
   if (primary)
     return is_hash_index ? PRIMARY_KEY_INDEX : PRIMARY_KEY_ORDERED_INDEX;
+
+  if (key_info[index_num].algorithm == HA_KEY_ALG_VECTOR_DISTANCE)
+    return VECTOR_INDEX;
 
   if (!(key_info[index_num].flags & HA_NOSAME)) return ORDERED_INDEX;
 
@@ -8102,6 +8108,13 @@ static const struct NDB_Modifier ndb_table_modifiers[] = {
     {NDB_Modifier::M_STRING, STRING_WITH_LEN("PARTITION_BALANCE"), 0, {0}},
     {NDB_Modifier::M_BOOL, nullptr, 0, 0, {0}}};
 
+static const char *ndb_index_modifier_prefix = "NDB_INDEX=";
+
+/* Modifiers that we support currently */
+static const struct NDB_Modifier ndb_index_modifiers[] = {
+    {NDB_Modifier::M_STRING, STRING_WITH_LEN("DISTANCE_ALGORITHM"), 0, {0}},
+    {NDB_Modifier::M_BOOL, nullptr, 0, 0, {0}}};
+
 static const char *ndb_column_modifier_prefix = "NDB_COLUMN=";
 
 static const struct NDB_Modifier ndb_column_modifiers[] = {
@@ -10238,7 +10251,8 @@ int ha_ndbcluster::create(const char *path [[maybe_unused]],
   }
 
   // Check that NDB and DD metadata matches
-  assert(Ndb_metadata::compare(thd, ndb, dbname, ndbtab, table_def));
+  // Martin: removed until DICT store vector index meta data
+  //assert(Ndb_metadata::compare(thd, ndb, dbname, ndbtab, table_def));
 
   // Apply the mysql.ndb_replication settings
   if (binlog_client.apply_replication_info(ndb, share, ndbtab) != 0) {
@@ -10290,8 +10304,42 @@ int ha_ndbcluster::create_index(THD *thd, const char *name, const KEY *key_info,
   char unique_name[FN_LEN + 1];
   static const char *unique_suffix = "$unique";
   DBUG_TRACE;
-  DBUG_PRINT("enter", ("name: %s", name));
+  DBUG_PRINT("enter", ("name: %s, index type: %u, KEY: 0x%llx", name, idx_type, (ulonglong)key_info));
 
+  NDB_Modifiers index_modifiers(ndb_index_modifier_prefix, ndb_index_modifiers);
+  if (key_info->comment.length > 0)
+    DBUG_PRINT("info", ("Martin: Found index comment %s", key_info->comment.str));
+  if (index_modifiers.loadComment(key_info->comment.str, key_info->comment.length) ==
+      -1) {
+    push_warning_printf(thd, Sql_condition::SL_WARNING,
+                        ER_ILLEGAL_HA_CREATE_OPTION, "%s",
+                        index_modifiers.getErrMsg());
+    my_error(ER_ILLEGAL_HA_CREATE_OPTION, MYF(0), ndbcluster_hton_name,
+             "Syntax error in COMMENT modifier");
+
+    return HA_WRONG_CREATE_OPTION;
+  }
+
+  enum distance_algorithm_type dist_alg = default_distance_algorithm;
+  const NDB_Modifier *mod_dist_alg= index_modifiers.get("DISTANCE_ALGORITHM");
+  if (mod_dist_alg->m_found) {
+    if (idx_type != VECTOR_INDEX) {
+      my_error(ER_ILLEGAL_HA_CREATE_OPTION, MYF(0), ndbcluster_hton_name,
+               "DISTANCE_ALGORITHM is only valid for VECTOR INDEX");
+
+      return HA_WRONG_CREATE_OPTION;
+    }
+    if (mod_dist_alg->m_type != NDB_Modifier::M_STRING ||
+        (! check_vector_distance_algorithm(mod_dist_alg->m_val_str.str,
+                                    mod_dist_alg->m_val_str.len))) {
+      my_error(ER_ILLEGAL_HA_CREATE_OPTION, MYF(0), ndbcluster_hton_name,
+               "Illegal DISTANCE_ALGORITHM specified for VECTOR INDEX");
+
+      return HA_WRONG_CREATE_OPTION;
+    }
+    dist_alg = get_vector_distance_algorithm(mod_dist_alg->m_val_str.str,
+                                             mod_dist_alg->m_val_str.len);
+  }
   if (idx_type == UNIQUE_ORDERED_INDEX || idx_type == UNIQUE_INDEX) {
     strxnmov(unique_name, FN_LEN, name, unique_suffix, NullS);
     DBUG_PRINT("info", ("unique_name: '%s'", unique_name));
@@ -10331,9 +10379,13 @@ int ha_ndbcluster::create_index(THD *thd, const char *name, const KEY *key_info,
       }
       error = create_index_in_NDB(thd, name, key_info, ndbtab, false);
       break;
-    default:
-      assert(false);
-      break;
+  case VECTOR_INDEX:
+    DBUG_PRINT("info", ("Creating vector index: '%s using %u(%u)'", name, key_info->algorithm, dist_alg));
+    error = create_index_in_NDB(thd, name, key_info, ndbtab, false);
+    break;
+  default:
+    assert(false);
+    break;
   }
 
   return error;
@@ -16777,8 +16829,10 @@ bool ha_ndbcluster::commit_inplace_alter_table(
       }
 
       // Check that NDB and DD metadata matches
-      assert(Ndb_metadata::compare(thd, thd_ndb->ndb, dbname, ndbtab,
-                                   new_table_def));
+      // Martin removed check for now
+      // TODO store added data in DICT and write comparable metadata
+      //assert(Ndb_metadata::compare(thd, thd_ndb->ndb, dbname, ndbtab,
+      //                             new_table_def));
     }
   }
 

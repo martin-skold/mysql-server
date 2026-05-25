@@ -31,6 +31,58 @@
 #include <immintrin.h>
 #endif
 
+#define MAX_ALG_NAME_LEN 16
+
+enum distance_algorithm_type {
+  DA_COSINE = 0,
+  DA_DOT = 1,
+  DA_EUCLIDEAN = 2
+};
+static const char *distance_algorithm_names[] = {"COSINE", "DOT", "EUCLIDEAN", NullS};
+static const enum distance_algorithm_type default_distance_algorithm = DA_DOT;
+static const char *default_distance_algorithm_name = distance_algorithm_names[default_distance_algorithm];
+
+inline bool check_vector_distance_algorithm(const char* algorithm, size_t length)
+{
+  char alg_name[MAX_ALG_NAME_LEN];
+  strncpy(alg_name, algorithm, (length<MAX_ALG_NAME_LEN)?length:MAX_ALG_NAME_LEN);
+  char *c = alg_name;
+  for (uint i = 0; i++ < length; c++) {
+    *c = my_toupper(system_charset_info, *c);
+  }
+  if (strcmp(algorithm, "COSINE") == 0)
+    return true;
+  else if (strcmp(algorithm, "DOT") == 0)
+    return true;
+  else if (strcmp(algorithm, "EUCLIDEAN") == 0)
+    return true;
+  else
+    return false;
+}
+
+inline enum distance_algorithm_type get_vector_distance_algorithm(const char* algorithm, size_t length)
+{
+  char alg_name[MAX_ALG_NAME_LEN];
+  strncpy(alg_name, algorithm, (length<MAX_ALG_NAME_LEN)?length:MAX_ALG_NAME_LEN);
+  char *c = alg_name;
+  for (uint i  = 0; i++ < length; c++) {
+    *c = my_toupper(system_charset_info, *c);
+  }
+  if (strcmp(algorithm, "COSINE") == 0)
+    return DA_COSINE;
+  else if (strcmp(algorithm, "DOT") == 0)
+    return DA_DOT;
+  else if (strcmp(algorithm, "EUCLIDEAN") == 0)
+    return DA_EUCLIDEAN;
+  else
+    return default_distance_algorithm;
+}
+
+inline const char *get_distance_algorithm_name(const enum distance_algorithm_type alg_type)
+{
+  return distance_algorithm_names[alg_type];
+}
+
 /**
 * Cosine distance
 */

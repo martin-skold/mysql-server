@@ -806,7 +806,7 @@ static dd::Index::enum_index_algorithm dd_get_new_index_algorithm_type(
       return dd::Index::IA_FULLTEXT;
 
     case HA_KEY_ALG_VECTOR_DISTANCE:
-      return dd::Index::IA_SE_SPECIFIC;
+      return dd::Index::IA_VECTOR_DISTANCE;
   }
 
   /* purecov: begin deadcode */
@@ -821,6 +821,8 @@ static dd::Index::enum_index_type dd_get_new_index_type(const KEY *key) {
   if (key->flags & HA_FULLTEXT) return dd::Index::IT_FULLTEXT;
 
   if (key->flags & HA_SPATIAL) return dd::Index::IT_SPATIAL;
+
+  if (key->flags & HA_VECTOR_INDEX) return dd::Index::IT_VECTOR_INDEX;
 
   if (key->flags & HA_NOSAME) {
     /*
@@ -902,6 +904,7 @@ static void fill_dd_index_elements_from_key_parts(
         case dd::Index::IT_MULTIPLE:
         case dd::Index::IT_FULLTEXT:
         case dd::Index::IT_SPATIAL:
+        case dd::Index::IT_VECTOR_INDEX:
           if (key_part == key_parts)
             const_cast<dd::Column *>(key_col_obj)
                 ->set_column_key(dd::Column::CK_MULTIPLE);

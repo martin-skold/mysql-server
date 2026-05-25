@@ -860,7 +860,8 @@ bool NdbTableImpl::equal(const NdbTableImpl &obj) const {
   }
 
   if (m_type == NdbDictionary::Object::UniqueHashIndex ||
-      m_type == NdbDictionary::Object::OrderedIndex) {
+      m_type == NdbDictionary::Object::OrderedIndex ||
+      m_type == NdbDictionary::Object::VectorIndex) {
     if (m_primaryTableId != obj.m_primaryTableId) {
       DBUG_PRINT("info", ("m_primaryTableId %d != %d", m_primaryTableId,
                           obj.m_primaryTableId));
@@ -2956,6 +2957,7 @@ static const ApiKernelMapping objectTypeMapping[] = {
     {DictTabInfo::UserTable, NdbDictionary::Object::UserTable},
     {DictTabInfo::UniqueHashIndex, NdbDictionary::Object::UniqueHashIndex},
     {DictTabInfo::OrderedIndex, NdbDictionary::Object::OrderedIndex},
+    {DictTabInfo::VectorIndex, NdbDictionary::Object::VectorIndex},
     {DictTabInfo::HashIndexTrigger, NdbDictionary::Object::HashIndexTrigger},
     {DictTabInfo::IndexTrigger, NdbDictionary::Object::IndexTrigger},
     {DictTabInfo::SubscriptionTrigger,

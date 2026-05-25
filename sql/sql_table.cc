@@ -5138,6 +5138,7 @@ static bool prepare_key_column(THD *thd, HA_CREATE_INFO *create_info,
       return true;
     }
     key_info->flags |= HA_VECTOR_INDEX;
+    key_info->algorithm = HA_KEY_ALG_VECTOR_DISTANCE;
   }
 
   if (sql_field->auto_flags & Field::NEXT_NUMBER) {

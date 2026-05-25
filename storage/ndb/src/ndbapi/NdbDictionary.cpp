@@ -3259,6 +3259,9 @@ NdbOut &operator<<(NdbOut &ndbout, NdbDictionary::Object::Type const type) {
     case NdbDictionary::Object::OrderedIndex:
       ndbout << "OrderedIndex";
       break;
+    case NdbDictionary::Object::VectorIndex:
+      ndbout << "VectorIndex";
+      break;
     case NdbDictionary::Object::HashIndexTrigger:
       ndbout << "HashIndexTrigger";
       break;
@@ -3320,6 +3323,9 @@ NdbOut &operator<<(NdbOut &ndbout, NdbDictionary::Index::Type const type) {
       break;
     case NdbDictionary::Index::OrderedIndex:
       ndbout << "OrderedIndex";
+      break;
+    case NdbDictionary::Index::VectorIndex:
+      ndbout << "VectorIndex";
       break;
     default:
       ndbout << "Type " << (unsigned)type;
@@ -3502,7 +3508,8 @@ void NdbDictionary::Dictionary::print(NdbOut &ndbout,
     for (j = 0; j < list.count; j++) {
       List::Element &elt = list.elements[j];
       if (elt.type != NdbDictionary::Object::UniqueHashIndex &&
-          elt.type != NdbDictionary::Object::OrderedIndex)
+          elt.type != NdbDictionary::Object::OrderedIndex &&
+          elt.type != NdbDictionary::Object::VectorIndex)
         continue;
 
       const Index *pIdx = getIndex(elt.name, tab);

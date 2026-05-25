@@ -3163,6 +3163,9 @@ static void store_key_options(THD *thd, String *packet, TABLE *table,
         assert(!(key_info->flags & HA_SPATIAL));
         packet->append(STRING_WITH_LEN(" USING RTREE"));
       }
+
+      if (key_info->algorithm == HA_KEY_ALG_VECTOR_DISTANCE)
+        packet->append(STRING_WITH_LEN(" USING DISTANCE"));
     }
 
     if ((key_info->flags & HA_USES_BLOCK_SIZE) &&
@@ -4910,6 +4913,9 @@ static int get_schema_tmp_table_keys_record(THD *thd, Table_ref *tables,
             break;
           case HA_KEY_ALG_FULLTEXT:
             str = "FULLTEXT";
+            break;
+          case HA_KEY_ALG_VECTOR_DISTANCE:
+            str = "DISTANCE";
             break;
           default:
             assert(0);
